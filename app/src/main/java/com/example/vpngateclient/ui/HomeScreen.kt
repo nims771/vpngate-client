@@ -2,6 +2,9 @@ package com.example.vpngateclient.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -126,8 +130,17 @@ fun HomeScreen(
         LocationCard(state, findServer, onOpenLocations)
 
         Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionCard(Modifier.weight(1f)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SectionCard(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
                 Text("Серверов", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("${state.servers.size}", style = MaterialTheme.typography.headlineSmall)
                 val alive = state.pings.values.count { it > 0 }
@@ -138,18 +151,29 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            SectionCard(Modifier.weight(1f)) {
+            SectionCard(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                onClick = if (state.loading) null else onRefresh,
+            ) {
                 Text("Список", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     if (state.loading) "обновляется…" else formatAgo(state.updatedAt),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.headlineSmall,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                TextButton(
-                    onClick = onRefresh,
-                    enabled = !state.loading,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-                ) { Text("Обновить") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = Green,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("обновить", style = MaterialTheme.typography.bodySmall, color = Green)
+                }
             }
         }
         Spacer(Modifier.height(16.dp))

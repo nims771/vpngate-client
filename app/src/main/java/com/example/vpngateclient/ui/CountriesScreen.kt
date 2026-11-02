@@ -320,14 +320,15 @@ private fun ServerRow(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "${server.flag} ${server.hostName}" + if (connected) "  • подключено" else "",
+                    "${server.flag} ${server.hostName}",
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "${formatSpeed(server.speedBps)} · ${server.sessions} сесс. · ${server.proto.uppercase()} ${server.port}",
+                    (if (connected) "подключено · " else "") +
+                        "${formatSpeed(server.speedBps)} · ${server.sessions} сесс. · ${server.proto.uppercase()} ${server.port}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
