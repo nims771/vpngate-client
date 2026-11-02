@@ -1,314 +1,183 @@
 package com.example.vpngateclient.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.NetworkCheck
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.vpngateclient.data.VpnServer
-import com.example.vpngateclient.data.countryFlag
-import com.example.vpngateclient.vpn.VpnStatus
+import com.example.vpngateclient.ui.theme.Amber
+import com.example.vpngateclient.ui.theme.Green
+import com.example.vpngateclient.ui.theme.Idle
 
 private val Gold = Color(0xFFFFB300)
 
-// ---------- Карточка состояния VPN ----------
+enum class PowerState { IDLE, CONNECTING, CONNECTED }
+
+// ---------- Большая кнопка подключения ----------
 
 @Composable
-fun StatusCard(
-    status: VpnStatus,
-    lastLog: String?,
-    findingBest: Boolean,
-    onDisconnect: () -> Unit,
-    onConnectBest: () -> Unit,
-) {
-    val dotColor = when {
-        status.isConnected -> Color(0xFF2E7D32)
-        status.isActive -> Color(0xFFE08A00)
-        else -> MaterialTheme.colorScheme.outline
+fun PowerButton(state: PowerState, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val target = when (state) {
+        PowerState.CONNECTED -> Green
+        PowerState.CONNECTING -> Amber
+        PowerState.IDLE -> Idle
     }
-    ElevatedCard(
+    val color by animateColorAsState(target, tween(500), label = "powerColor")
+
+    val transition = rememberInfiniteTransition(label = "pulse")
+    val pulse by transition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulseScale",
+    )
+    val glowAlpha = when (state) {
+        PowerState.CONNECTED -> 0.45f
+        PowerState.CONNECTING -> 0.35f
+        PowerState.IDLE -> 0.12f
+    }
+
+    Box(
+        modifier
+            .size(270.dp)
+            .drawBehind {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(color.copy(alpha = glowAlpha), Color.Transparent),
+                        radius = size.minDimension / 2f,
+                    ),
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = if (state == PowerState.IDLE) MaterialTheme.colorScheme.surfaceContainerHigh else color,
+            border = if (state == PowerState.IDLE) BorderStroke(3.dp, Green.copy(alpha = 0.6f)) else null,
+            shadowElevation = 12.dp,
+            modifier = Modifier
+                .size(200.dp)
+                .scale(if (state == PowerState.CONNECTING) pulse else 1f),
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                val content = if (state == PowerState.IDLE) Green else Color.White
+                Icon(
+                    Icons.Default.PowerSettingsNew,
+                    contentDescription = null,
+                    tint = content,
+                    modifier = Modifier.size(78.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    when (state) {
+                        PowerState.IDLE -> "ПОДКЛЮЧИТЬ"
+                        PowerState.CONNECTING -> "ОТМЕНА"
+                        PowerState.CONNECTED -> "ОТКЛЮЧИТЬ"
+                    },
+                    color = content,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
+// ---------- Карточки и строки ----------
+
+@Composable
+fun SectionCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    val color = MaterialTheme.colorScheme.surfaceContainer
+    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    if (onClick != null) {
+        Surface(onClick = onClick, modifier = modifier, shape = shape, color = color, border = border) {
+            Column(Modifier.padding(16.dp), content = content)
+        }
+    } else {
+        Surface(modifier = modifier, shape = shape, color = color, border = border) {
+            Column(Modifier.padding(16.dp), content = content)
+        }
+    }
+}
+
+@Composable
+fun FlagBox(flag: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.size(52.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+        Box(contentAlignment = Alignment.Center) { Text(flag, fontSize = 28.sp) }
+    }
+}
+
+@Composable
+fun SwitchRow(text: String, checked: Boolean, subtitle: String? = null, onChange: (Boolean) -> Unit) {
+    Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(14.dp)
-                    .clip(CircleShape)
-                    .background(dotColor)
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(status.title, style = MaterialTheme.typography.titleMedium)
-                val sub = when {
-                    status.isActive && status.serverName != null ->
-                        status.serverName + (status.protocol?.let { " · $it" } ?: "") + if (status.isConnecting && lastLog != null) "\n${lastLog.substringAfter("  ")}" else ""
-                    status.level == "LEVEL_AUTH_FAILED" -> "Сервер отклонил подключение — выберите другой"
-                    else -> "Выберите сервер или нажмите «Лучший»"
-                }
+        Column(Modifier.weight(1f)) {
+            Text(text, style = MaterialTheme.typography.bodyLarge)
+            if (subtitle != null) {
                 Text(
-                    sub,
+                    subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            if (status.isActive) {
-                OutlinedButton(onClick = onDisconnect) { Text("Отключить") }
-            } else {
-                Button(onClick = onConnectBest, enabled = !findingBest) {
-                    if (findingBest) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.Bolt, contentDescription = null, Modifier.size(18.dp))
-                    }
-                    Spacer(Modifier.width(6.dp))
-                    Text("Лучший")
-                }
-            }
-        }
-    }
-}
-
-// ---------- Поиск и фильтры ----------
-
-@Composable
-fun FilterBar(
-    state: UiState,
-    onQuery: (String) -> Unit,
-    onCountry: (String?) -> Unit,
-    onProto: (String?) -> Unit,
-    onOnlyReachable: (Boolean) -> Unit,
-    onSort: (SortMode) -> Unit,
-    onPingAll: () -> Unit,
-    onStopPing: () -> Unit,
-) {
-    Column {
-        OutlinedTextField(
-            value = state.query,
-            onValueChange = onQuery,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            placeholder = { Text("Поиск: страна, IP, имя сервера") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            trailingIcon = {
-                if (state.query.isNotEmpty()) {
-                    IconButton(onClick = { onQuery("") }) {
-                        Icon(Icons.Default.Close, contentDescription = "Очистить")
-                    }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(28.dp),
-        )
-
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                FilterChip(
-                    selected = state.country == null,
-                    onClick = { onCountry(null) },
-                    label = { Text("🌐 Все страны") },
-                )
-            }
-            items(state.countries, key = { it.code }) { c ->
-                FilterChip(
-                    selected = state.country == c.code,
-                    onClick = { onCountry(if (state.country == c.code) null else c.code) },
-                    label = { Text("${countryFlag(c.code)} ${c.name} · ${c.count}") },
                 )
             }
         }
-
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (state.pingRunning) {
-                AssistChip(
-                    onClick = onStopPing,
-                    label = { Text("Стоп ${state.pingDone}/${state.pingTotal}") },
-                    leadingIcon = { Icon(Icons.Default.Stop, contentDescription = null) },
-                )
-            } else {
-                AssistChip(
-                    onClick = onPingAll,
-                    label = { Text("Проверить пинг") },
-                    leadingIcon = { Icon(Icons.Default.NetworkCheck, contentDescription = null) },
-                )
-            }
-            SortMenu(state.sort, onSort)
-            FilterChip(
-                selected = state.onlyReachable,
-                onClick = { onOnlyReachable(!state.onlyReachable) },
-                label = { Text("Только доступные") },
-            )
-            FilterChip(
-                selected = state.proto == "tcp",
-                onClick = { onProto(if (state.proto == "tcp") null else "tcp") },
-                label = { Text("TCP") },
-            )
-            FilterChip(
-                selected = state.proto == "udp",
-                onClick = { onProto(if (state.proto == "udp") null else "udp") },
-                label = { Text("UDP") },
-            )
-        }
-    }
-}
-
-@Composable
-private fun SortMenu(current: SortMode, onSort: (SortMode) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        AssistChip(
-            onClick = { open = true },
-            label = { Text(current.label) },
-            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null) },
-        )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            SortMode.entries.forEach { mode ->
-                DropdownMenuItem(
-                    text = { Text(mode.label) },
-                    onClick = {
-                        onSort(mode)
-                        open = false
-                    },
-                    leadingIcon = {
-                        if (mode == current) Icon(Icons.Default.Check, contentDescription = null)
-                    },
-                )
-            }
-        }
-    }
-}
-
-// ---------- Элемент списка ----------
-
-@Composable
-fun ServerItem(
-    server: VpnServer,
-    ping: Long?,
-    pinging: Boolean,
-    favorite: Boolean,
-    connected: Boolean,
-    onClick: () -> Unit,
-    onFavorite: () -> Unit,
-) {
-    Card(
-        onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        colors = if (connected) {
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        } else {
-            CardDefaults.cardColors()
-        },
-    ) {
-        Row(
-            Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(server.flag, fontSize = 30.sp)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    server.countryLong + if (connected) "  • подключено" else "",
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    "${server.hostName} · ${server.ip}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    "${formatSpeed(server.speedBps)} · ${server.sessions} сесс. · ${server.proto.uppercase()} ${server.port}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                PingBadge(ping, pinging, Modifier.padding(end = 8.dp))
-                IconButton(onClick = onFavorite, modifier = Modifier.size(40.dp)) {
-                    Icon(
-                        if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = if (favorite) "Убрать из избранного" else "В избранное",
-                        tint = if (favorite) Gold else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 

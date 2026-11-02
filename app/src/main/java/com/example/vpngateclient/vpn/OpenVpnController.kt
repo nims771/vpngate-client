@@ -318,10 +318,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
 
     fun disconnect() {
         fallbackAllowed = false
-        if (active == null) {
-            stopSstp()
-            stopOpenVpn()
-        }
+        if (active == null) stopSstp()
         pending = null
         when (active) {
             Protocol.OPENVPN -> stopOpenVpn()

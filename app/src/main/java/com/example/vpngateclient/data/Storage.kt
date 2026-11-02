@@ -15,15 +15,19 @@ import java.net.URL
 
 data class AppSettings(
     val listUrl: String = DEFAULT_URL,
-    val pingTimeoutMs: Int = 2000,
-    val pingParallel: Int = 16,
+    val pingTimeoutMs: Int = 3000,
+    val pingParallel: Int = 12,
     val autoPing: Boolean = true,
     val autoRefresh: Boolean = true,
-    val protocol: Protocol = Protocol.AUTO,
+    val protocol: Protocol = Protocol.SSTP,
     /** Доверять самоподписанным сертификатам SSTP-серверов. */
     val sstpTrustAll: Boolean = false,
     /** Отправлять имя сервера (SNI) при SSTP. Выключено: фильтры видят только IP. */
     val sstpSendSni: Boolean = false,
+    /** Подключаться автоматически при запуске приложения. */
+    val autoConnect: Boolean = false,
+    /** Сколько серверов перебирать при автовыборе, если подключение не удалось. */
+    val maxAttempts: Int = 5,
 ) {
     companion object {
         const val DEFAULT_URL = "http://www.vpngate.net/api/iphone/"
@@ -35,27 +39,56 @@ class SettingsStore(context: Context) {
 
     fun load() = AppSettings(
         listUrl = sp.getString("listUrl", null)?.takeIf { it.isNotBlank() } ?: AppSettings.DEFAULT_URL,
-        pingTimeoutMs = sp.getInt("pingTimeoutMs", 2000),
-        pingParallel = sp.getInt("pingParallel", 16),
+        pingTimeoutMs = sp.getInt("pingTimeout3", 3000),
+        pingParallel = sp.getInt("pingParallel3", 12),
         autoPing = sp.getBoolean("autoPing", true),
         autoRefresh = sp.getBoolean("autoRefresh", true),
-        protocol = runCatching { Protocol.valueOf(sp.getString("protocol", null) ?: "AUTO") }
-            .getOrDefault(Protocol.AUTO),
+        // ключ сменён в 3.1: по умолчанию теперь SSTP (OpenVPN часто блокируется)
+        protocol = runCatching { Protocol.valueOf(sp.getString("protocol3", null) ?: "SSTP") }
+            .getOrDefault(Protocol.SSTP),
         sstpTrustAll = sp.getBoolean("sstpTrustAll", false),
         sstpSendSni = sp.getBoolean("sstpSendSni", false),
+        autoConnect = sp.getBoolean("autoConnect", false),
+        maxAttempts = sp.getInt("maxAttempts", 5),
     )
 
     fun save(s: AppSettings) {
         sp.edit()
             .putString("listUrl", s.listUrl)
-            .putInt("pingTimeoutMs", s.pingTimeoutMs)
-            .putInt("pingParallel", s.pingParallel)
+            .putInt("pingTimeout3", s.pingTimeoutMs)
+            .putInt("pingParallel3", s.pingParallel)
             .putBoolean("autoPing", s.autoPing)
             .putBoolean("autoRefresh", s.autoRefresh)
-            .putString("protocol", s.protocol.name)
+            .putString("protocol3", s.protocol.name)
             .putBoolean("sstpTrustAll", s.sstpTrustAll)
             .putBoolean("sstpSendSni", s.sstpSendSni)
+            .putBoolean("autoConnect", s.autoConnect)
+            .putInt("maxAttempts", s.maxAttempts)
             .apply()
+    }
+}
+
+// ---------- Выбор сервера ----------
+
+/** Что выбрано для подключения: автовыбор, страна или конкретный сервер. */
+sealed interface Selection {
+    data object Auto : Selection
+    data class Country(val code: String) : Selection
+    data class Server(val id: String) : Selection
+
+    fun encode(): String = when (this) {
+        Auto -> "auto"
+        is Country -> "country:$code"
+        is Server -> "server:$id"
+    }
+
+    companion object {
+        fun decode(s: String?): Selection = when {
+            s == null -> Auto
+            s.startsWith("country:") -> Country(s.removePrefix("country:"))
+            s.startsWith("server:") -> Server(s.removePrefix("server:"))
+            else -> Auto
+        }
     }
 }
 

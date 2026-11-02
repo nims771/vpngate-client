@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.VpnGateClient" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/ic_launcher_background</item>
+    <style name="Theme.VpnGateClient" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0B0F0D</item>
+        <item name="android:statusBarColor">#FF0B0F0D</item>
+        <item name="android:navigationBarColor">#FF0B0F0D</item>
     </style>
-    <color name="ic_launcher_background">#FF0B3C5D</color>
+    <color name="ic_launcher_background">#FF0F2A1B</color>
 </resources>

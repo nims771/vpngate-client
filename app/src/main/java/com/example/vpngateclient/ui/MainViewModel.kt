@@ -1,6 +1,7 @@
 package com.example.vpngateclient.ui
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -8,37 +9,33 @@ import androidx.lifecycle.viewModelScope
 import com.example.vpngateclient.App
 import com.example.vpngateclient.data.AppSettings
 import com.example.vpngateclient.data.FavoritesStore
+import com.example.vpngateclient.data.Selection
 import com.example.vpngateclient.data.ServerRepository
 import com.example.vpngateclient.data.SettingsStore
 import com.example.vpngateclient.data.VpnServer
 import com.example.vpngateclient.net.PingChecker
 import com.example.vpngateclient.vpn.ConnectResult
 import com.example.vpngateclient.vpn.OvpnConfig
+import com.example.vpngateclient.vpn.Protocol
 import com.example.vpngateclient.vpn.VpnStatus
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.cancellation.CancellationException
-
-enum class SortMode(val label: String) {
-    SCORE("По рейтингу"),
-    PING("По пингу"),
-    SPEED("По скорости"),
-    SESSIONS("Меньше нагрузка"),
-    COUNTRY("По стране"),
-}
-
-enum class ListTab { ALL, FAVORITES }
 
 data class CountryInfo(val code: String, val name: String, val count: Int)
 
@@ -57,13 +54,14 @@ data class UiState(
     val pingTotal: Int = 0,
     val favorites: Map<String, VpnServer> = emptyMap(),
     val query: String = "",
-    val country: String? = null,
-    val proto: String? = null,
-    val onlyReachable: Boolean = false,
-    val sort: SortMode = SortMode.SCORE,
-    val tab: ListTab = ListTab.ALL,
     val settings: AppSettings = AppSettings(),
-    val findingBest: Boolean = false,
+    val selection: Selection = Selection.Auto,
+    /** Идёт подбор/перебор серверов. */
+    val connecting: Boolean = false,
+    /** Подпись о текущей попытке: «Сервер 2 из 5: Japan». */
+    val attemptInfo: String? = null,
+    /** Время, с которого туннель подключён (для таймера). */
+    val connectedSince: Long = 0L,
 )
 
 sealed interface UiEvent {
@@ -71,39 +69,44 @@ sealed interface UiEvent {
     data class LaunchIntent(val intent: Intent) : UiEvent
 }
 
-/** Отфильтрованный и отсортированный список для экрана. */
-fun UiState.visibleServers(): List<VpnServer> {
-    val base = when (tab) {
-        ListTab.ALL -> servers
-        ListTab.FAVORITES -> favorites.values.toList()
-    }
-    val q = query.trim()
-    val filtered = base.filter { s ->
-        (country == null || s.countryShort.equals(country, ignoreCase = true)) &&
-            (proto == null || s.proto == proto) &&
-            (!onlyReachable || (pings[s.id] ?: -1L) > 0) &&
-            (q.isEmpty() ||
-                s.hostName.contains(q, true) ||
-                s.ip.contains(q) ||
-                s.countryLong.contains(q, true) ||
-                s.countryShort.equals(q, true) ||
-                s.operator.contains(q, true))
-    }
-    return when (sort) {
-        SortMode.SCORE -> filtered.sortedByDescending { it.score }
-        SortMode.PING -> filtered.sortedWith(
-            compareBy<VpnServer> { pingSortKey(pings[it.id]) }.thenByDescending { it.score }
-        )
-        SortMode.SPEED -> filtered.sortedByDescending { it.speedBps }
-        SortMode.SESSIONS -> filtered.sortedWith(compareBy<VpnServer> { it.sessions }.thenByDescending { it.score })
-        SortMode.COUNTRY -> filtered.sortedWith(compareBy<VpnServer> { it.countryLong }.thenByDescending { it.score })
-    }
+/** Страна + её серверы, отсортированные по качеству. */
+data class CountryGroup(
+    val info: CountryInfo,
+    val servers: List<VpnServer>,
+    /** Лучший пинг среди серверов страны, null — не проверялись, -1 — никто не ответил. */
+    val bestPing: Long?,
+)
+
+/** Чем меньше, тем лучше: пинг + штрафы за медленный канал и нагрузку. */
+fun serverCost(server: VpnServer, ping: Long): Long {
+    val slowPenalty = if (server.speedBps < 10_000_000) 150 else 0
+    return ping + slowPenalty + server.sessions.coerceAtMost(60) * 3L
 }
 
-private fun pingSortKey(p: Long?): Long = when {
+fun pingSortKey(p: Long?): Long = when {
     p == null -> Long.MAX_VALUE - 1 // не проверен
     p < 0 -> Long.MAX_VALUE         // не ответил
     else -> p
+}
+
+fun UiState.sortedServers(list: List<VpnServer>): List<VpnServer> =
+    list.sortedWith(compareBy<VpnServer> { pingSortKey(pings[it.id]) }.thenByDescending { it.score })
+
+/** Страны с серверами для вкладки «Страны» (с учётом поиска). */
+fun UiState.countryGroups(): List<CountryGroup> {
+    val q = query.trim()
+    return servers.groupBy { it.countryShort.uppercase() }
+        .map { (code, list) ->
+            val measured = list.mapNotNull { pings[it.id] }
+            val best = when {
+                measured.isEmpty() -> null
+                measured.any { it > 0 } -> measured.filter { it > 0 }.min()
+                else -> -1L
+            }
+            CountryGroup(CountryInfo(code, list.first().countryLong, list.size), sortedServers(list), best)
+        }
+        .filter { q.isEmpty() || it.info.name.contains(q, true) || it.info.code.equals(q, true) }
+        .sortedWith(compareBy<CountryGroup> { pingSortKey(it.bestPing) }.thenByDescending { it.info.count })
 }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -111,10 +114,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ServerRepository(app)
     private val settingsStore = SettingsStore(app)
     private val favoritesStore = FavoritesStore(app)
+    private val prefs = app.getSharedPreferences("ui", Context.MODE_PRIVATE)
     private val vpn = (app as App).vpn
 
     private val _state = MutableStateFlow(
-        UiState(settings = settingsStore.load(), favorites = favoritesStore.load())
+        UiState(
+            settings = settingsStore.load(),
+            favorites = favoritesStore.load(),
+            selection = Selection.decode(prefs.getString("selection", null)),
+        )
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
     val vpnStatus: StateFlow<VpnStatus> = vpn.status
@@ -124,17 +132,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val events = _events.receiveAsFlow()
 
     private var pingJob: Job? = null
-    private var pendingConnect: VpnServer? = null
-    private var permissionRounds = 0
+    private var connectJob: Job? = null
+    private var permissionWait: CompletableDeferred<Boolean>? = null
     var pendingExport: VpnServer? = null
 
     init {
+        // Таймер подключения
+        viewModelScope.launch {
+            vpn.status.collect { st ->
+                _state.update {
+                    when {
+                        st.isConnected && it.connectedSince == 0L -> it.copy(connectedSince = System.currentTimeMillis())
+                        !st.isConnected && it.connectedSince != 0L -> it.copy(connectedSince = 0L)
+                        else -> it
+                    }
+                }
+            }
+        }
+
         viewModelScope.launch {
             val cached = repo.loadCache()
             if (cached != null) setServers(cached.servers, cached.savedAt, fromCache = true)
             val stale = cached == null ||
                 System.currentTimeMillis() - cached.savedAt > CACHE_TTL_MS
-            if (cached == null || (stale && _state.value.settings.autoRefresh)) refresh()
+
+            if (_state.value.settings.autoConnect && !vpn.status.value.isActive && cached != null) {
+                connectSelected()
+            }
+            if (cached == null || (stale && _state.value.settings.autoRefresh)) {
+                refresh()
+            } else if (_state.value.settings.autoPing && connectJob?.isActive != true) {
+                pingAll()
+            }
         }
     }
 
@@ -148,7 +177,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val list = repo.download(_state.value.settings.listUrl)
                 setServers(list, System.currentTimeMillis(), fromCache = false)
                 _state.update { it.copy(loading = false) }
-                if (_state.value.settings.autoPing) pingVisible()
+                msg("Список обновлён: ${list.size} серверов")
+                if (_state.value.settings.autoPing) pingAll()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -179,17 +209,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 updatedAt = time,
                 fromCache = fromCache,
                 favorites = newFav,
+                // старые результаты сбрасываем: после обновления проверим заново
                 pings = if (fromCache) st.pings else st.pings.filterKeys { it in byId || it in newFav },
-                country = st.country?.takeIf { c -> countries.any { it.code == c } },
             )
         }
     }
 
     // ---------- пинг ----------
 
-    fun pingVisible() = pingAll(_state.value.visibleServers())
+    /** Проверить все серверы (и избранные, которых нет в списке). */
+    fun pingAll() {
+        val st = _state.value
+        val targets = (st.servers + st.favorites.values).distinctBy { it.id }
+        startPing(targets)
+    }
 
-    fun pingAll(targets: List<VpnServer>) {
+    fun pingCountry(code: String) {
+        startPing(_state.value.servers.filter { it.countryShort.equals(code, true) })
+    }
+
+    private fun startPing(targets: List<VpnServer>) {
         pingJob?.cancel()
         if (targets.isEmpty()) return
         pingJob = viewModelScope.launch {
@@ -230,85 +269,159 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---------- подключение ----------
+    // ---------- выбор и подключение ----------
 
-    fun connect(server: VpnServer) {
-        viewModelScope.launch {
-            pendingConnect = server
-            val settings = _state.value.settings
-            when (val r = vpn.connect(server, settings.protocol, settings.sstpTrustAll, settings.sstpSendSni)) {
-                is ConnectResult.NeedPermission -> {
-                    if (permissionRounds++ < 3) {
-                        _events.send(UiEvent.LaunchIntent(r.intent))
-                    } else {
-                        pendingConnect = null
-                        permissionRounds = 0
-                        msg("Android не выдал разрешение на VPN. Проверьте, не включён ли другой VPN «постоянно».")
+    fun findServer(id: String): VpnServer? =
+        _state.value.servers.firstOrNull { it.id == id } ?: _state.value.favorites[id]
+
+    /** Выбрать страну/сервер/автовыбор. Если VPN уже работает — переподключиться. */
+    fun select(selection: Selection) {
+        prefs.edit().putString("selection", selection.encode()).apply()
+        _state.update { it.copy(selection = selection) }
+        if (vpn.status.value.isActive || connectJob?.isActive == true) {
+            connectSelected()
+        }
+    }
+
+    /** Большая кнопка: подключить / отключить / отменить подключение. */
+    fun toggleConnection() {
+        if (connectJob?.isActive == true || vpn.status.value.isActive) {
+            cancelConnection()
+        } else {
+            connectSelected()
+        }
+    }
+
+    fun cancelConnection() {
+        connectJob?.cancel()
+        connectJob = null
+        permissionWait?.complete(false)
+        vpn.disconnect()
+        _state.update { it.copy(connecting = false, attemptInfo = null) }
+    }
+
+    /** Подключение к одному конкретному серверу (из карточки сервера). */
+    fun connectTo(server: VpnServer) {
+        select(Selection.Server(server.id))
+        if (connectJob?.isActive != true) connectSelected()
+    }
+
+    fun connectSelected() {
+        connectJob?.cancel()
+        connectJob = viewModelScope.launch {
+            _state.update { it.copy(connecting = true, attemptInfo = "Выбираем лучший сервер…") }
+            try {
+                val sel = _state.value.selection
+                val candidates = candidatesFor(sel)
+                if (candidates.isEmpty()) {
+                    msg(
+                        if (_state.value.servers.isEmpty()) "Список серверов пуст — обновите его"
+                        else "Нет доступных серверов. Обновите список или выберите другую страну."
+                    )
+                    return@launch
+                }
+                val list = candidates.take(_state.value.settings.maxAttempts.coerceIn(1, 15))
+                for ((index, server) in list.withIndex()) {
+                    _state.update {
+                        it.copy(
+                            attemptInfo = if (list.size > 1)
+                                "Сервер ${index + 1} из ${list.size}: ${server.flag} ${server.countryLong}"
+                            else null
+                        )
+                    }
+                    when (tryConnect(server)) {
+                        Attempt.CONNECTED -> return@launch
+                        Attempt.CANCELLED -> return@launch
+                        Attempt.FAILED -> {
+                            // помечаем, чтобы автовыбор не брал его снова первым
+                            _state.update { it.copy(pings = it.pings + (server.id to -1L)) }
+                        }
                     }
                 }
-                ConnectResult.Started -> {
-                    pendingConnect = null
-                    permissionRounds = 0
-                    msg("Подключаемся: ${server.countryLong}, ${server.ip}")
-                }
-                is ConnectResult.Error -> {
-                    pendingConnect = null
-                    permissionRounds = 0
-                    msg(r.message)
-                }
+                vpn.disconnect()
+                msg("Не удалось подключиться. Обновите список серверов или выберите другую страну.")
+            } finally {
+                _state.update { it.copy(connecting = false, attemptInfo = null) }
             }
+        }
+    }
+
+    private enum class Attempt { CONNECTED, FAILED, CANCELLED }
+
+    private suspend fun tryConnect(server: VpnServer): Attempt {
+        val settings = _state.value.settings
+        suspend fun start() = vpn.connect(server, settings.protocol, settings.sstpTrustAll, settings.sstpSendSni)
+
+        var result = start()
+        if (result is ConnectResult.NeedPermission) {
+            val wait = CompletableDeferred<Boolean>()
+            permissionWait = wait
+            _events.send(UiEvent.LaunchIntent(result.intent))
+            if (!wait.await()) {
+                msg("Без разрешения Android на VPN подключиться нельзя")
+                return Attempt.CANCELLED
+            }
+            result = start()
+            if (result is ConnectResult.NeedPermission) {
+                msg("Android не выдал разрешение на VPN. Проверьте, не включён ли другой VPN «постоянно».")
+                return Attempt.CANCELLED
+            }
+        }
+        if (result is ConnectResult.Error) {
+            msg(result.message)
+            return Attempt.FAILED
+        }
+
+        val timeout = when (settings.protocol) {
+            Protocol.SSTP -> 40_000L
+            Protocol.OPENVPN -> 70_000L
+            Protocol.AUTO -> 110_000L
+        }
+        val final = withTimeoutOrNull(timeout) {
+            vpn.status.first { it.isConnected || it.level in FAILED_LEVELS }
+        }
+        if (final?.isConnected == true) return Attempt.CONNECTED
+
+        vpn.disconnect()
+        delay(1_500) // даём службе закрыться перед следующей попыткой
+        return Attempt.FAILED
+    }
+
+    /** Кандидаты для подключения в порядке «от лучшего». */
+    private suspend fun candidatesFor(sel: Selection): List<VpnServer> {
+        val st = _state.value
+        val base = when (sel) {
+            Selection.Auto -> st.servers
+            is Selection.Country -> st.servers.filter { it.countryShort.equals(sel.code, true) }
+            is Selection.Server -> return listOfNotNull(findServer(sel.id))
+        }
+        if (base.isEmpty()) return emptyList()
+
+        // Проверяем пинг у тех, у кого его ещё нет (сначала самые «рейтинговые»)
+        val unknown = base.filter { _state.value.pings[it.id] == null }
+            .sortedByDescending { it.score }
+            .take(40)
+        if (unknown.isNotEmpty()) {
+            _state.update { it.copy(attemptInfo = "Проверяем пинг серверов…") }
+            runPings(unknown, countProgress = false)
+        }
+
+        val pings = _state.value.pings
+        val alive = base.filter { (pings[it.id] ?: -1L) > 0 }
+        return if (alive.isNotEmpty()) {
+            alive.sortedBy { serverCost(it, pings.getValue(it.id)) }
+        } else {
+            // Пинг мог не пройти (например, через работающий VPN) — пробуем по рейтингу
+            base.sortedByDescending { it.score }
         }
     }
 
     fun onPermissionResult(granted: Boolean) {
-        val server = pendingConnect ?: return
-        if (granted) {
-            connect(server)
-        } else {
-            pendingConnect = null
-            permissionRounds = 0
-            viewModelScope.launch { msg("Разрешение не выдано — подключение отменено") }
-        }
+        permissionWait?.complete(granted)
+        permissionWait = null
     }
-
-    fun disconnect() = vpn.disconnect()
 
     fun clearLog() = vpn.clearLog()
-
-    /** Проверяет пинг у лучших по рейтингу и подключается к самому быстрому. */
-    fun connectBest() {
-        if (_state.value.findingBest) return
-        viewModelScope.launch {
-            _state.update { it.copy(findingBest = true) }
-            try {
-                val st = _state.value
-                val candidates = st.visibleServers().ifEmpty { st.servers }
-                    .sortedByDescending { it.score }
-                    .take(30)
-                if (candidates.isEmpty()) {
-                    msg("Список серверов пуст — обновите его")
-                    return@launch
-                }
-                val unknown = candidates.filter { _state.value.pings[it.id] == null }
-                if (unknown.isNotEmpty()) runPings(unknown, countProgress = false)
-
-                val pings = _state.value.pings
-                val alive = candidates.filter { (pings[it.id] ?: -1L) > 0 }
-                if (alive.isEmpty()) {
-                    msg("Ни один сервер не ответил. Обновите список или проверьте интернет.")
-                    return@launch
-                }
-                // Из близких по пингу берём самый быстрый по скорости канала
-                val minPing = alive.minOf { pings.getValue(it.id) }
-                val best = alive
-                    .filter { pings.getValue(it.id) <= minPing * 3 / 2 + 20 }
-                    .maxBy { it.speedBps }
-                connect(best)
-            } finally {
-                _state.update { it.copy(findingBest = false) }
-            }
-        }
-    }
 
     // ---------- избранное / экспорт ----------
 
@@ -338,14 +451,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---------- фильтры и настройки ----------
+    // ---------- поиск и настройки ----------
 
     fun setQuery(q: String) = _state.update { it.copy(query = q) }
-    fun setCountry(c: String?) = _state.update { it.copy(country = c) }
-    fun setProto(p: String?) = _state.update { it.copy(proto = p) }
-    fun setOnlyReachable(v: Boolean) = _state.update { it.copy(onlyReachable = v) }
-    fun setSort(s: SortMode) = _state.update { it.copy(sort = s) }
-    fun setTab(t: ListTab) = _state.update { it.copy(tab = t) }
 
     fun updateSettings(s: AppSettings) {
         settingsStore.save(s)
@@ -356,5 +464,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val CACHE_TTL_MS = 30 * 60_000L
+        val FAILED_LEVELS = setOf("LEVEL_NOTCONNECTED", "LEVEL_AUTH_FAILED")
     }
 }
