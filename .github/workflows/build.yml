@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -25,7 +28,22 @@ jobs:
       - name: Build APK
         run: ./gradlew assembleRelease
 
+      - name: Rename APK
+        run: cp app/build/outputs/apk/release/app-release.apk VpnGateClient.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: VpnGateClient-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: VpnGateClient.apk
+
+      # Публикует APK в Releases: https://github.com/<owner>/<repo>/releases/latest
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" VpnGateClient.apk \
+            --title "VPN Gate Client (сборка ${{ github.run_number }})" \
+            --notes "Автоматическая сборка из коммита ${GITHUB_SHA::7}. Для подключения нужен OpenVPN for Android." \
+            --latest
