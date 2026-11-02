@@ -198,6 +198,7 @@ fun SettingsDialog(
     var autoRefresh by remember { mutableStateOf(current.autoRefresh) }
     var protocol by remember { mutableStateOf(current.protocol) }
     var sstpTrustAll by remember { mutableStateOf(current.sstpTrustAll) }
+    var sstpSendSni by remember { mutableStateOf(current.sstpSendSni) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -224,6 +225,7 @@ fun SettingsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 SwitchRow("SSTP: доверять самоподписанным сертификатам", sstpTrustAll) { sstpTrustAll = it }
+                SwitchRow("SSTP: отправлять имя сервера (SNI)", sstpSendSni) { sstpSendSni = it }
                 Spacer(Modifier.height(12.dp))
 
                 OutlinedTextField(
@@ -272,6 +274,7 @@ fun SettingsDialog(
                         autoRefresh = autoRefresh,
                         protocol = protocol,
                         sstpTrustAll = sstpTrustAll,
+                        sstpSendSni = sstpSendSni,
                     )
                 )
             }) { Text("Сохранить") }

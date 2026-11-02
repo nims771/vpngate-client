@@ -6,6 +6,7 @@ import kittoku.osc.ControlMessage
 import kittoku.osc.Result
 import kittoku.osc.SharedBridge
 import kittoku.osc.Where
+import kittoku.osc.api.SstpEngine
 import kittoku.osc.extension.capacityAfterLimit
 import kittoku.osc.extension.slide
 import kittoku.osc.extension.toIntAsUByte
@@ -46,7 +47,8 @@ import java.security.SecureRandom
 private const val HTTP_DELIMITER = "\r\n"
 private const val HTTP_SUFFIX = "\r\n\r\n"
 
-internal const val SSL_REQUEST_INTERVAL = 10_000L
+// Изменено для VPN Gate Client: 10 с мало для медленных/фильтруемых сетей
+internal const val SSL_REQUEST_INTERVAL = 30_000L
 
 internal class SSLTerminal(private val bridge: SharedBridge) {
     private val mutex = Mutex()
@@ -67,9 +69,9 @@ internal class SSLTerminal(private val bridge: SharedBridge) {
     private val selectedVersion = getStringPrefValue(OscPrefKey.SSL_VERSION, bridge.prefs)
     private val enabledSuites = getSetPrefValue(OscPrefKey.SSL_SUITES, bridge.prefs)
     // Изменено для VPN Gate Client: подключаемся по IP, а имя сервера берём из SNI
+    // (имя для заголовка Host шифруется внутри TLS; SNI отправляется только если включён)
     private val httpHostname: String =
-        if (getBooleanPrefValue(OscPrefKey.SSL_DO_USE_CUSTOM_SNI, bridge.prefs))
-            getStringPrefValue(OscPrefKey.SSL_CUSTOM_SNI, bridge.prefs) else sslHostname
+        getStringPrefValue(OscPrefKey.SSL_CUSTOM_SNI, bridge.prefs).ifEmpty { sslHostname }
 
     internal fun initialize() {
         jobInitialize = bridge.service.scope.launch(bridge.handler) {
@@ -128,6 +130,8 @@ internal class SSLTerminal(private val bridge: SharedBridge) {
             socketInputStream = it.getInputStream()
             socketOutputStream = it.getOutputStream()
         }
+        SstpEngine.log("SSTP: TCP-соединение установлено, начинаем TLS" +
+            if (getBooleanPrefValue(OscPrefKey.SSL_DO_USE_CUSTOM_SNI, bridge.prefs)) " (SNI: $httpHostname)" else " (без SNI)")
 
         if (doUseProxy) {
             if (!establishProxy()) {
@@ -150,6 +154,8 @@ internal class SSLTerminal(private val bridge: SharedBridge) {
                 throw e
             }
         }
+
+        SstpEngine.log("SSTP: TLS готов (${engine.session.protocol}, ${engine.session.cipherSuite}), отправляем запрос SSTP")
 
         if (getBooleanPrefValue(OscPrefKey.SSL_DO_VERIFY, bridge.prefs)) {
             HttpsURLConnection.getDefaultHostnameVerifier().also {
@@ -270,6 +276,7 @@ internal class SSLTerminal(private val bridge: SharedBridge) {
             }
         }
 
+        SstpEngine.log("SSTP: ответ сервера: " + response.split(HTTP_DELIMITER)[0])
         if (!response.split(HTTP_DELIMITER)[0].contains("200")) {
             bridge.controlMailbox.send(ControlMessage(Where.SSL, Result.ERR_UNEXPECTED_MESSAGE))
             return false

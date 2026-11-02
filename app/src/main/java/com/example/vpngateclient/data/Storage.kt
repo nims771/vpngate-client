@@ -22,6 +22,8 @@ data class AppSettings(
     val protocol: Protocol = Protocol.AUTO,
     /** Доверять самоподписанным сертификатам SSTP-серверов. */
     val sstpTrustAll: Boolean = false,
+    /** Отправлять имя сервера (SNI) при SSTP. Выключено: фильтры видят только IP. */
+    val sstpSendSni: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_URL = "http://www.vpngate.net/api/iphone/"
@@ -40,6 +42,7 @@ class SettingsStore(context: Context) {
         protocol = runCatching { Protocol.valueOf(sp.getString("protocol", null) ?: "AUTO") }
             .getOrDefault(Protocol.AUTO),
         sstpTrustAll = sp.getBoolean("sstpTrustAll", false),
+        sstpSendSni = sp.getBoolean("sstpSendSni", false),
     )
 
     fun save(s: AppSettings) {
@@ -51,6 +54,7 @@ class SettingsStore(context: Context) {
             .putBoolean("autoRefresh", s.autoRefresh)
             .putString("protocol", s.protocol.name)
             .putBoolean("sstpTrustAll", s.sstpTrustAll)
+            .putBoolean("sstpSendSni", s.sstpSendSni)
             .apply()
     }
 }

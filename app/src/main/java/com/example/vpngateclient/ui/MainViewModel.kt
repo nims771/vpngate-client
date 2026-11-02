@@ -236,7 +236,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             pendingConnect = server
             val settings = _state.value.settings
-            when (val r = vpn.connect(server, settings.protocol, settings.sstpTrustAll)) {
+            when (val r = vpn.connect(server, settings.protocol, settings.sstpTrustAll, settings.sstpSendSni)) {
                 is ConnectResult.NeedPermission -> {
                     if (permissionRounds++ < 3) {
                         _events.send(UiEvent.LaunchIntent(r.intent))

@@ -31,8 +31,10 @@ object SstpEngine {
         /** IP или имя хоста, к которому открывается TCP-соединение. */
         val host: String,
         val port: Int = 443,
-        /** Имя для SNI и заголовка Host (например vpn123.opengw.net). */
+        /** Имя сервера для заголовка Host (например vpn123.opengw.net). */
         val sni: String? = null,
+        /** Отправлять ли имя в открытом виде в TLS (SNI). Его видят фильтры провайдера. */
+        val sendSni: Boolean = false,
         val username: String = "vpn",
         val password: String = "vpn",
         /** Доверять любому сертификату сервера (для самоподписанных). */
@@ -69,7 +71,7 @@ object SstpEngine {
             .putString(OscPrefKey.SSL_PORT.name, config.port.toString()) // движок хранит числа строками
             .putBoolean(OscPrefKey.SSL_DO_VERIFY.name, false) // имя хоста не проверяем: подключаемся по IP
             .putBoolean(OscPrefKey.SSL_DO_SPECIFY_CERT.name, config.trustAllCertificates)
-            .putBoolean(OscPrefKey.SSL_DO_USE_CUSTOM_SNI.name, config.sni != null)
+            .putBoolean(OscPrefKey.SSL_DO_USE_CUSTOM_SNI.name, config.sni != null && config.sendSni)
             .putString(OscPrefKey.SSL_CUSTOM_SNI.name, config.sni ?: "")
             .putStringSet(OscPrefKey.PPP_AUTH_PROTOCOLS.name, setOf(AUTH_PROTOCOl_PAP, AUTH_PROTOCOL_MSCHAPv2))
             .putBoolean(OscPrefKey.PPP_IPv4_ENABLED.name, true)

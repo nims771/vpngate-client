@@ -214,7 +214,12 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
 
     // ---------- подключение ----------
 
-    suspend fun connect(server: VpnServer, protocol: Protocol, trustAllSstp: Boolean): ConnectResult {
+    suspend fun connect(
+        server: VpnServer,
+        protocol: Protocol,
+        trustAllSstp: Boolean,
+        sendSni: Boolean,
+    ): ConnectResult {
         // Системное разрешение на VPN (диалог Android показывается один раз)
         VpnService.prepare(appContext)?.let { return ConnectResult.NeedPermission(it) }
 
@@ -222,6 +227,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
         prefs.edit().putString("serverId", server.id).putString("serverName", name).apply()
         pending = server
         this.trustAllSstp = trustAllSstp
+        this.sendSni = sendSni
 
         return when (protocol) {
             Protocol.OPENVPN -> {
@@ -246,6 +252,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
     }
 
     private var trustAllSstp = false
+    private var sendSni = false
 
     private fun startSstp(server: VpnServer, name: String): ConnectResult {
         active = Protocol.SSTP
@@ -266,6 +273,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
                     host = server.ip,
                     port = port,
                     sni = "${server.hostName}.opengw.net",
+                    sendSni = sendSni,
                     trustAllCertificates = trustAllSstp,
                     serverName = name,
                 ),
