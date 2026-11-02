@@ -20,8 +20,6 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
       # SWIG нужен CMake-скрипту OpenVPN for Android
       - name: Install SWIG
         run: sudo apt-get update -qq && sudo apt-get install -y -qq swig
