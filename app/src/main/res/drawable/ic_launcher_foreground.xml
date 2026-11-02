@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Щит с ключом-скважиной -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,28 L76,36 L76,52 C76,66 66.5,77.5 54,81 C41.5,77.5 32,66 32,52 L32,36 Z" />
+    <path
+        android:fillColor="#FF0B3C5D"
+        android:pathData="M54,44 a6,6 0 1,1 -0.01,0 Z M51,54 L57,54 L59,67 L49,67 Z" />
+</vector>
