@@ -12,21 +12,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      - uses: android-actions/setup-android@v3
+
+      # SWIG нужен CMake-скрипту OpenVPN for Android
+      - name: Install SWIG
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq swig
+
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Unit tests
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest
+          ./gradlew :app:testDebugUnitTest
 
       - name: Build APK
-        run: ./gradlew assembleRelease
+        run: ./gradlew :app:assembleRelease
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk VpnGateClient.apk
@@ -45,5 +53,5 @@ jobs:
           TAG="build-${{ github.run_number }}"
           gh release create "$TAG" VpnGateClient.apk \
             --title "VPN Gate Client (сборка ${{ github.run_number }})" \
-            --notes "Автоматическая сборка из коммита ${GITHUB_SHA::7}. Для подключения нужен OpenVPN for Android." \
+            --notes "Автоматическая сборка из коммита ${GITHUB_SHA::7}. VPN встроен в приложение." \
             --latest

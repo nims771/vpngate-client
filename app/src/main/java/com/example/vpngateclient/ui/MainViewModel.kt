@@ -63,7 +63,6 @@ data class UiState(
     val sort: SortMode = SortMode.SCORE,
     val tab: ListTab = ListTab.ALL,
     val settings: AppSettings = AppSettings(),
-    val showInstallDialog: Boolean = false,
     val findingBest: Boolean = false,
 )
 
@@ -129,7 +128,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var pendingExport: VpnServer? = null
 
     init {
-        vpn.bind()
         viewModelScope.launch {
             val cached = repo.loadCache()
             if (cached != null) setServers(cached.servers, cached.savedAt, fromCache = true)
@@ -244,12 +242,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     } else {
                         pendingConnect = null
                         permissionRounds = 0
-                        msg("OpenVPN for Android не выдаёт разрешение. Откройте его и проверьте настройки.")
+                        msg("Android не выдал разрешение на VPN. Проверьте, не включён ли другой VPN «постоянно».")
                     }
-                }
-                ConnectResult.NotInstalled -> {
-                    pendingConnect = null
-                    _state.update { it.copy(showInstallDialog = true) }
                 }
                 ConnectResult.Started -> {
                     pendingConnect = null
@@ -312,8 +306,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-
-    fun dismissInstallDialog() = _state.update { it.copy(showInstallDialog = false) }
 
     // ---------- избранное / экспорт ----------
 

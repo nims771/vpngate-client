@@ -4,20 +4,25 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.content.pm.PackageManager
+import android.net.VpnService
 import android.os.IBinder
-import android.os.RemoteException
-import de.blinkt.openvpn.api.IOpenVPNAPIService
-import de.blinkt.openvpn.api.IOpenVPNStatusCallback
+import de.blinkt.openvpn.R
+import de.blinkt.openvpn.core.ConfigParser
+import de.blinkt.openvpn.core.ConnectionStatus
+import de.blinkt.openvpn.core.IOpenVPNServiceInternal
+import de.blinkt.openvpn.core.OpenVPNService
+import de.blinkt.openvpn.core.ProfileManager
+import de.blinkt.openvpn.core.VPNLaunchHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
+import java.io.StringReader
+import de.blinkt.openvpn.core.VpnStatus as EngineStatus
 
-/** Текущее состояние туннеля (уровни — из ConnectionStatus OpenVPN for Android). */
+/** Текущее состояние туннеля (уровни — из ConnectionStatus движка OpenVPN). */
 data class VpnStatus(
     val level: String = "LEVEL_NOTCONNECTED",
     val state: String = "",
@@ -51,131 +56,93 @@ data class VpnStatus(
 
 sealed interface ConnectResult {
     data object Started : ConnectResult
-    data object NotInstalled : ConnectResult
-    /** Нужно показать системный диалог и потом повторить connect(). */
+    /** Нужно показать системный запрос на VPN и потом повторить connect(). */
     data class NeedPermission(val intent: Intent) : ConnectResult
     data class Error(val message: String) : ConnectResult
 }
 
 /**
- * Управление туннелем через официальный внешний API приложения
- * «OpenVPN for Android» (de.blinkt.openvpn) по AIDL.
- * Само шифрование и VpnService делает это приложение — нам не нужно
- * собирать нативный OpenVPN и не нужно лицензировать свой код под GPL.
+ * Встроенный OpenVPN (движок OpenVPN for Android, собирается вместе с приложением).
+ * Туннель работает в отдельном процессе «:openvpn», состояние приходит сюда
+ * через EngineStatus (его транслирует StatusListener из ICSOpenVPNApplication).
  */
-class OpenVpnController(context: Context) {
-
-    companion object {
-        const val PACKAGE = "de.blinkt.openvpn"
-    }
+class OpenVpnController(context: Context) : EngineStatus.StateListener {
 
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("vpn", Context.MODE_PRIVATE)
 
-    private val service = MutableStateFlow<IOpenVPNAPIService?>(null)
     private val _status = MutableStateFlow(
         VpnStatus(serverId = prefs.getString("serverId", null), serverName = prefs.getString("serverName", null))
     )
     val status: StateFlow<VpnStatus> = _status.asStateFlow()
 
-    @Volatile private var bound = false
-    @Volatile private var callbackRegistered = false
+    init {
+        EngineStatus.addStateListener(this)
+    }
 
-    private val callback = object : IOpenVPNStatusCallback.Stub() {
-        override fun newStatus(uuid: String?, state: String?, message: String?, level: String?) {
-            _status.update {
-                it.copy(level = level ?: it.level, state = state.orEmpty(), message = message.orEmpty())
-            }
+    override fun updateState(
+        state: String?,
+        logmessage: String?,
+        localizedResId: Int,
+        level: ConnectionStatus?,
+        intent: Intent?,
+    ) {
+        _status.update {
+            it.copy(
+                level = level?.name ?: it.level,
+                state = state.orEmpty(),
+                message = logmessage.orEmpty(),
+            )
         }
     }
 
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            service.value = IOpenVPNAPIService.Stub.asInterface(binder)
-            callbackRegistered = false
-            tryRegisterCallback()
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            service.value = null
-            callbackRegistered = false
-        }
-
-        override fun onBindingDied(name: ComponentName?) {
-            runCatching { appContext.unbindService(this) }
-            service.value = null
-            bound = false
-            callbackRegistered = false
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    fun isInstalled(): Boolean = try {
-        appContext.packageManager.getPackageInfo(PACKAGE, 0)
-        true
-    } catch (e: PackageManager.NameNotFoundException) {
-        false
-    }
-
-    fun bind() {
-        if (bound || !isInstalled()) return
-        val intent = Intent(IOpenVPNAPIService::class.java.name).setPackage(PACKAGE)
-        bound = try {
-            appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE)
-        } catch (e: SecurityException) {
-            false
-        }
-    }
-
-    /** Без разрешения пользователя OpenVPN for Android бросит SecurityException — это нормально. */
-    private fun tryRegisterCallback() {
-        if (callbackRegistered) return
-        val s = service.value ?: return
-        callbackRegistered = try {
-            s.registerStatusCallback(callback)
-            true
-        } catch (e: SecurityException) {
-            false
-        } catch (e: RemoteException) {
-            false
-        }
-    }
+    override fun setConnectedVPN(uuid: String?) {}
 
     suspend fun connect(config: String, serverId: String, serverName: String): ConnectResult {
-        if (!isInstalled()) return ConnectResult.NotInstalled
-        bind()
-        val s = withTimeoutOrNull(5_000) { service.filterNotNull().first() }
-            ?: return ConnectResult.Error(
-                "Не удалось связаться с OpenVPN for Android. Откройте его один раз и попробуйте снова."
-            )
+        // Системное разрешение на VPN (диалог Android показывается один раз)
+        VpnService.prepare(appContext)?.let { return ConnectResult.NeedPermission(it) }
 
-        return try {
-            // 1) разрешение «этому приложению можно управлять OpenVPN»
-            s.prepare(appContext.packageName)?.let { return ConnectResult.NeedPermission(it) }
-            tryRegisterCallback()
-            // 2) системное разрешение на VPN
-            s.prepareVPNService()?.let { return ConnectResult.NeedPermission(it) }
+        return withContext(Dispatchers.IO) {
+            try {
+                val parser = ConfigParser()
+                parser.parseConfig(StringReader(config))
+                val profile = parser.convertProfile()
+                profile.mName = serverName
 
-            prefs.edit().putString("serverId", serverId).putString("serverName", serverName).apply()
-            _status.update {
-                it.copy(level = "LEVEL_START", state = "", message = "", serverId = serverId, serverName = serverName)
+                val check = profile.checkProfile(appContext)
+                if (check != R.string.no_error_found) {
+                    return@withContext ConnectResult.Error(
+                        "Конфиг сервера не подходит: ${appContext.getString(check)}"
+                    )
+                }
+
+                ProfileManager.setTemporaryProfile(appContext, profile)
+                prefs.edit().putString("serverId", serverId).putString("serverName", serverName).apply()
+                _status.update {
+                    it.copy(level = "LEVEL_START", state = "", message = "", serverId = serverId, serverName = serverName)
+                }
+                VPNLaunchHelper.startOpenVpn(profile, appContext, "VPN Gate Client", true)
+                ConnectResult.Started
+            } catch (e: Exception) {
+                ConnectResult.Error("Не удалось запустить VPN: ${e.message ?: e.javaClass.simpleName}")
             }
-            s.startVPN(config)
-            ConnectResult.Started
-        } catch (e: SecurityException) {
-            ConnectResult.Error("OpenVPN for Android отклонил запрос: ${e.message}")
-        } catch (e: RemoteException) {
-            service.value = null
-            bound = false
-            ConnectResult.Error("Связь с OpenVPN for Android потеряна, попробуйте ещё раз")
         }
     }
 
     fun disconnect() {
-        try {
-            service.value?.disconnect()
-        } catch (e: Exception) {
-            // ignore
+        val intent = Intent(appContext, OpenVPNService::class.java).setAction(OpenVPNService.START_SERVICE)
+        val connection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                try {
+                    IOpenVPNServiceInternal.Stub.asInterface(binder).stopVPN(false)
+                } catch (e: Exception) {
+                    // ignore
+                }
+                runCatching { appContext.unbindService(this) }
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {}
         }
+        runCatching { appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE) }
     }
 }

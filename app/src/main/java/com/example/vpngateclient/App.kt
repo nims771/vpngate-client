@@ -1,15 +1,13 @@
 package com.example.vpngateclient
 
-import android.app.Application
 import com.example.vpngateclient.vpn.OpenVpnController
+import de.blinkt.openvpn.core.ICSOpenVPNApplication
 
-class App : Application() {
-    lateinit var vpn: OpenVpnController
-        private set
-
-    override fun onCreate() {
-        super.onCreate()
-        vpn = OpenVpnController(this)
-        vpn.bind()
-    }
+/**
+ * ICSOpenVPNApplication создаёт каналы уведомлений VPN и подписывается
+ * на статус туннеля из процесса «:openvpn».
+ */
+class App : ICSOpenVPNApplication() {
+    // Создаётся лениво: в процессе «:openvpn» интерфейс не нужен
+    val vpn: OpenVpnController by lazy { OpenVpnController(this) }
 }

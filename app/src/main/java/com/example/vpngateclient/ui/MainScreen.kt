@@ -1,6 +1,11 @@
 package com.example.vpngateclient.ui
 
+import android.Manifest
 import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -68,6 +73,20 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/x-openvpn-profile")
     ) { uri -> if (uri != null) vm.exportTo(uri) }
+
+    // Android 13+: без разрешения не видно уведомления VPN с кнопкой «Отключить»
+    val context = LocalContext.current
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     LaunchedEffect(Unit) {
         vm.events.collect { event ->
@@ -244,10 +263,6 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                 showSettings = false
             },
         )
-    }
-
-    if (state.showInstallDialog) {
-        InstallOpenVpnDialog(onDismiss = vm::dismissInstallDialog)
     }
 }
 

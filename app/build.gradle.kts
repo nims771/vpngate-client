@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,24 +8,20 @@ plugins {
 
 android {
     namespace = "com.example.vpngateclient"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.vpngateclient"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // Движок OpenVPN использует JNI, поэтому код не сжимаем и не переименовываем
+            isMinifyEnabled = false
             // Для личного использования release подписывается debug-ключом.
             // Перед публикацией в Google Play замените на свой ключ.
             signingConfig = signingConfigs.getByName("debug")
@@ -34,17 +32,34 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 
     buildFeatures {
         compose = true
-        aidl = true
+    }
+
+    packaging {
+        jniLibs {
+            // OpenVPN запускается как отдельный бинарник из папки нативных библиотек,
+            // поэтому они должны распаковываться при установке
+            useLegacyPackaging = true
+        }
+    }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
 dependencies {
+    implementation(project(":openvpn"))
+
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
 

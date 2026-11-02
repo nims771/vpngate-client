@@ -1,9 +1,5 @@
 package com.example.vpngateclient.ui
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -43,7 +39,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -260,49 +255,5 @@ private fun SwitchRow(text: String, checked: Boolean, onChange: (Boolean) -> Uni
     ) {
         Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-// ---------- OpenVPN for Android не установлен ----------
-
-@Composable
-fun InstallOpenVpnDialog(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Нужен OpenVPN for Android") },
-        text = {
-            Text(
-                "Сам туннель поднимает бесплатное приложение «OpenVPN for Android» " +
-                    "(автор Arne Schwabe). Установите его, вернитесь сюда и снова нажмите «Подключиться».\n\n" +
-                    "При первом подключении оно спросит, можно ли этому приложению им управлять, " +
-                    "а Android — разрешение на VPN. Ответьте «OK» в обоих окнах."
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                openUrl(
-                    context,
-                    "market://details?id=de.blinkt.openvpn",
-                    fallback = "https://play.google.com/store/apps/details?id=de.blinkt.openvpn",
-                )
-                onDismiss()
-            }) { Text("Google Play") }
-        },
-        dismissButton = {
-            TextButton(onClick = {
-                openUrl(context, "https://f-droid.org/packages/de.blinkt.openvpn/")
-                onDismiss()
-            }) { Text("F-Droid") }
-        },
-    )
-}
-
-private fun openUrl(context: Context, url: String, fallback: String? = null) {
-    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        context.startActivity(intent)
-    } catch (e: ActivityNotFoundException) {
-        if (fallback != null) openUrl(context, fallback)
     }
 }
