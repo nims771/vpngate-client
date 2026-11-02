@@ -18,6 +18,8 @@ android {
         minSdk = 26
         // Используем классический OpenVPN 2 (лучше всего совместим с VPN Gate)
         buildConfigField("boolean", "openvpn3", "false")
+        // В оригинале это имя product flavor; код движка проверяет его
+        buildConfigField("String", "FLAVOR", "\"skeleton\"")
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
