@@ -9,6 +9,8 @@ plugins {
 android {
     namespace = "com.example.vpngateclient"
     compileSdk = 36
+    // Та же версия NDK, что и у модуля :openvpn — нужна, чтобы вырезать отладочные символы из .so
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "com.example.vpngateclient"
@@ -16,12 +18,21 @@ android {
         targetSdk = 35
         versionCode = 2
         versionName = "2.0"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
         release {
-            // Движок OpenVPN использует JNI, поэтому код не сжимаем и не переименовываем
-            isMinifyEnabled = false
+            // R8 убирает неиспользуемый код (в основном иконки Compose).
+            // Классы движка OpenVPN (JNI, AIDL) защищены правилами в proguard-rules.pro
+            isMinifyEnabled = true
+            isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             // Для личного использования release подписывается debug-ключом.
             // Перед публикацией в Google Play замените на свой ключ.
             signingConfig = signingConfigs.getByName("debug")
@@ -42,6 +53,8 @@ android {
             // OpenVPN запускается как отдельный бинарник из папки нативных библиотек,
             // поэтому они должны распаковываться при установке
             useLegacyPackaging = true
+            // OpenVPN 3 и тест скорости OpenSSL не используются (работаем на OpenVPN 2)
+            excludes += listOf("**/libovpn3.so", "**/libosslspeedtest.so")
         }
     }
 
