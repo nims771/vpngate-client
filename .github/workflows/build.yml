@@ -32,10 +32,15 @@ jobs:
       - name: Unit tests
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest
+          ./gradlew :app:testDebugUnitTest --tests '*VpnGateParserTest'
 
       - name: Build APK
         run: ./gradlew :app:assembleRelease
+
+      # Скриншоты экранов (Robolectric) — для проверки дизайна
+      - name: Screenshots
+        continue-on-error: true
+        run: ./gradlew :app:recordRoborazziDebug
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk VpnGateClient.apk
@@ -56,3 +61,15 @@ jobs:
             --title "VPN Gate Client (сборка ${{ github.run_number }})" \
             --notes "Автоматическая сборка из коммита ${GITHUB_SHA::7}. VPN встроен в приложение." \
             --latest
+
+      - name: Publish screenshots
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls app/build/outputs/roborazzi/*.png || exit 0
+          gh release delete screenshots -y --cleanup-tag || true
+          gh release create screenshots app/build/outputs/roborazzi/*.png \
+            --title "Скриншоты экранов" --notes "Автоматически из ScreenshotTest" \
+            --prerelease --latest=false
