@@ -66,7 +66,7 @@ object SstpEngine {
             .putString(OscPrefKey.HOME_HOSTNAME.name, config.host)
             .putString(OscPrefKey.HOME_USERNAME.name, config.username)
             .putString(OscPrefKey.HOME_PASSWORD.name, config.password)
-            .putInt(OscPrefKey.SSL_PORT.name, config.port)
+            .putString(OscPrefKey.SSL_PORT.name, config.port.toString()) // движок хранит числа строками
             .putBoolean(OscPrefKey.SSL_DO_VERIFY.name, false) // имя хоста не проверяем: подключаемся по IP
             .putBoolean(OscPrefKey.SSL_DO_SPECIFY_CERT.name, config.trustAllCertificates)
             .putBoolean(OscPrefKey.SSL_DO_USE_CUSTOM_SNI.name, config.sni != null)

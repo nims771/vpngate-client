@@ -6,7 +6,13 @@ import kittoku.osc.preference.OscPrefKey
 
 
 internal fun getIntPrefValue(key: OscPrefKey, prefs: SharedPreferences): Int {
-    return prefs.getString(key.name, null)?.toIntOrNull() ?: DEFAULT_INT_MAP[key]!!
+    // Изменено для VPN Gate Client: терпим и числа, сохранённые через putInt
+    val raw = prefs.all[key.name]
+    return when (raw) {
+        is Int -> raw
+        is String -> raw.toIntOrNull()
+        else -> null
+    } ?: DEFAULT_INT_MAP[key]!!
 }
 
 internal fun setIntPrefValue(value: Int, key: OscPrefKey, prefs: SharedPreferences) {

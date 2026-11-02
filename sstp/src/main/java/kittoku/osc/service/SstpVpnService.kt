@@ -84,7 +84,7 @@ internal class SstpVpnService : VpnService() {
                 resetReconnectionLife(prefs)
 
                 logWriter?.write("SSTP: подключение к ${prefs.getString(OscPrefKey.HOME_HOSTNAME.name, "")}:" +
-                    "${prefs.getInt(OscPrefKey.SSL_PORT.name, 443)}")
+                    "${getIntPrefValue(OscPrefKey.SSL_PORT, prefs)}")
                 SstpEngine.setState(SstpEngine.Level.CONNECTING, "Подключение по SSTP…")
 
                 initializeClient()
