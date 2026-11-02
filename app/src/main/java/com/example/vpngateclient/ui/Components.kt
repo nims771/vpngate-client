@@ -69,6 +69,7 @@ private val Gold = Color(0xFFFFB300)
 @Composable
 fun StatusCard(
     status: VpnStatus,
+    lastLog: String?,
     findingBest: Boolean,
     onDisconnect: () -> Unit,
     onConnectBest: () -> Unit,
@@ -95,7 +96,7 @@ fun StatusCard(
                 Text(status.title, style = MaterialTheme.typography.titleMedium)
                 val sub = when {
                     status.isActive && status.serverName != null ->
-                        status.serverName + if (status.isConnecting && status.state.isNotBlank()) "\n${status.state}" else ""
+                        status.serverName + if (status.isConnecting && lastLog != null) "\n${lastLog.substringAfter("  ")}" else ""
                     status.level == "LEVEL_AUTH_FAILED" -> "Сервер отклонил подключение — выберите другой"
                     else -> "Выберите сервер или нажмите «Лучший»"
                 }

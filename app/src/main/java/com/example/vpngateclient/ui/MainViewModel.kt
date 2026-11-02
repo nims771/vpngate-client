@@ -118,6 +118,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
     val vpnStatus: StateFlow<VpnStatus> = vpn.status
+    val vpnLog: StateFlow<List<String>> = vpn.log
 
     private val _events = Channel<UiEvent>(Channel.BUFFERED)
     val events = _events.receiveAsFlow()
@@ -271,6 +272,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun disconnect() = vpn.disconnect()
+
+    fun clearLog() = vpn.clearLog()
 
     /** Проверяет пинг у лучших по рейтингу и подключается к самому быстрому. */
     fun connectBest() {

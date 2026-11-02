@@ -10,6 +10,7 @@ import de.blinkt.openvpn.R
 import de.blinkt.openvpn.core.ConfigParser
 import de.blinkt.openvpn.core.ConnectionStatus
 import de.blinkt.openvpn.core.IOpenVPNServiceInternal
+import de.blinkt.openvpn.core.LogItem
 import de.blinkt.openvpn.core.OpenVPNService
 import de.blinkt.openvpn.core.ProfileManager
 import de.blinkt.openvpn.core.VPNLaunchHelper
@@ -20,6 +21,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.io.StringReader
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import de.blinkt.openvpn.core.VpnStatus as EngineStatus
 
 /** Текущее состояние туннеля (уровни — из ConnectionStatus движка OpenVPN). */
@@ -66,7 +70,7 @@ sealed interface ConnectResult {
  * Туннель работает в отдельном процессе «:openvpn», состояние приходит сюда
  * через EngineStatus (его транслирует StatusListener из ICSOpenVPNApplication).
  */
-class OpenVpnController(context: Context) : EngineStatus.StateListener {
+class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineStatus.LogListener {
 
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("vpn", Context.MODE_PRIVATE)
@@ -76,8 +80,30 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener {
     )
     val status: StateFlow<VpnStatus> = _status.asStateFlow()
 
+    /** Журнал движка OpenVPN (последние строки). */
+    private val _log = MutableStateFlow<List<String>>(emptyList())
+    val log: StateFlow<List<String>> = _log.asStateFlow()
+    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
+
     init {
+        _log.value = runCatching { EngineStatus.getlogbuffer().map(::formatLog) }
+            .getOrDefault(emptyList()).takeLast(MAX_LOG)
+        EngineStatus.addLogListener(this)
         EngineStatus.addStateListener(this)
+    }
+
+    override fun newLog(logItem: LogItem) {
+        val line = formatLog(logItem)
+        _log.update { (it + line).takeLast(MAX_LOG) }
+    }
+
+    private fun formatLog(item: LogItem): String {
+        val text = runCatching { item.getString(appContext) }.getOrElse { "?" }
+        return timeFormat.format(Date(item.logtime)) + "  " + text
+    }
+
+    fun clearLog() {
+        _log.value = emptyList()
     }
 
     override fun updateState(
@@ -127,6 +153,10 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener {
                 ConnectResult.Error("Не удалось запустить VPN: ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    private companion object {
+        const val MAX_LOG = 500
     }
 
     fun disconnect() {

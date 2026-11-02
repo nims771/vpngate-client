@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -59,12 +60,14 @@ import kotlinx.coroutines.launch
 fun MainScreen(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val vpnStatus by vm.vpnStatus.collectAsStateWithLifecycle()
+    val vpnLog by vm.vpnLog.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
 
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showLog by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -122,6 +125,9 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                     IconButton(onClick = vm::refresh, enabled = !state.loading) {
                         Icon(Icons.Default.Refresh, contentDescription = "Обновить список")
                     }
+                    IconButton(onClick = { showLog = true }) {
+                        Icon(Icons.Default.Description, contentDescription = "Журнал подключения")
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "Настройки")
                     }
@@ -137,6 +143,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         ) {
             StatusCard(
                 status = vpnStatus,
+                lastLog = vpnLog.lastOrNull(),
                 findingBest = state.findingBest,
                 onDisconnect = vm::disconnect,
                 onConnectBest = vm::connectBest,
@@ -251,6 +258,18 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                 clipboard.setText(AnnotatedString(selected.ip))
                 scope.launch { snackbar.showSnackbar("IP скопирован: ${selected.ip}") }
             },
+        )
+    }
+
+    if (showLog) {
+        LogDialog(
+            lines = vpnLog,
+            onDismiss = { showLog = false },
+            onCopy = {
+                clipboard.setText(AnnotatedString(vpnLog.joinToString("\n")))
+                scope.launch { snackbar.showSnackbar("Журнал скопирован") }
+            },
+            onClear = vm::clearLog,
         )
     }
 
