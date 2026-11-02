@@ -25,6 +25,9 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq swig
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # В подмодуле ics-openvpn лежит свой gradle-wrapper.jar, который мы не используем
+          validate-wrappers: false
 
       - name: Unit tests
         run: |
