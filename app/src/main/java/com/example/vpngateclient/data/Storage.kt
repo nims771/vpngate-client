@@ -131,6 +131,7 @@ class FavoritesStore(context: Context) {
         put("sessions", sessions); put("uptimeMs", uptimeMs); put("totalUsers", totalUsers)
         put("totalTraffic", totalTraffic); put("logType", logType); put("operator", operator)
         put("message", message); put("proto", proto); put("port", port); put("config", config)
+        sstpPortHint?.let { put("sstpPort", it) }
     }
 
     private fun serverFromJson(o: JSONObject) = VpnServer(
@@ -150,6 +151,7 @@ class FavoritesStore(context: Context) {
         proto = o.optString("proto", "udp"),
         port = o.optInt("port", 1194),
         config = o.getString("config"),
+        sstpPortHint = if (o.has("sstpPort")) o.optInt("sstpPort") else null,
     )
 }
 

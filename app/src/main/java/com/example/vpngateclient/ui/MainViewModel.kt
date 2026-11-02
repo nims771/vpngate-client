@@ -439,7 +439,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             Selection.Auto -> st.servers
             is Selection.Country -> st.servers.filter { it.countryShort.equals(sel.code, true) }
             is Selection.Server -> return listOfNotNull(findServer(sel.id))
-        }
+        }.filter { st.settings.protocol != Protocol.OPENVPN || it.hasOpenVpn }
         if (base.isEmpty()) return emptyList()
 
         // Проверяем пинг у тех, у кого его ещё нет (сначала самые «рейтинговые»)

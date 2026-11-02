@@ -39,6 +39,7 @@ object VpnGateParser {
 
         val ip = f[1].trim()
         val endpoint = OvpnConfig.endpoint(config)
+        val sstpHint = SSTP_HINT.find(config)?.groupValues?.get(1)?.toIntOrNull()
 
         return VpnServer(
             hostName = f[0].trim(),
@@ -57,6 +58,9 @@ object VpnGateParser {
             proto = endpoint.proto,
             port = endpoint.port,
             config = config,
+            sstpPortHint = sstpHint,
         )
     }
+
+    private val SSTP_HINT = Regex("""^#sstp-port[ \t]+(\d+)""", RegexOption.MULTILINE)
 }

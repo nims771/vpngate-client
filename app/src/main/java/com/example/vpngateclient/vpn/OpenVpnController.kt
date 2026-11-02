@@ -267,7 +267,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
             )
         }
         // SoftEther принимает SSTP на тех же TCP-портах, что и OpenVPN-TCP; для UDP-серверов — 443
-        val port = if (server.proto == "tcp") server.port else 443
+        val port = server.sstpPort
         addLog("SSTP: ${server.ip}:$port (${server.hostName}.opengw.net)")
         return try {
             SstpEngine.connect(
@@ -289,6 +289,9 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
     }
 
     private suspend fun startOpenVpn(server: VpnServer): ConnectResult {
+        if (!server.hasOpenVpn) {
+            return ConnectResult.Error("У этого сервера нет OpenVPN-конфига — подключайтесь по SSTP")
+        }
         val name = "${server.flag} ${server.countryLong} · ${server.hostName}"
         active = Protocol.OPENVPN
         return withContext(Dispatchers.IO) {

@@ -20,8 +20,16 @@ data class VpnServer(
     val port: Int,
     /** Готовый .ovpn (уже раскодирован из base64). */
     val config: String,
+    /** TCP-порт для SSTP (из подсказки «#sstp-port» зеркала), null — неизвестен. */
+    val sstpPortHint: Int? = null,
 ) {
     val id: String get() = hostName
+
+    /** Есть ли полноценный OpenVPN-конфиг (у серверов «только с сайта» его нет). */
+    val hasOpenVpn: Boolean get() = config.contains("<ca>")
+
+    /** Куда подключаться по SSTP: SoftEther принимает SSTP на своих TCP-портах. */
+    val sstpPort: Int get() = sstpPortHint ?: if (proto == "tcp") port else 443
     val flag: String get() = countryFlag(countryShort)
 }
 

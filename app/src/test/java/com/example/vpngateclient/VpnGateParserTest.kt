@@ -80,6 +80,19 @@ class VpnGateParserTest {
     }
 
     @Test
+    fun sstpHintAndSiteOnlyServers() {
+        val withHint = udpConfig + "#sstp-port 1543\r\n"
+        val siteOnly = "client\r\ndev tun\r\nproto tcp\r\nremote 9.9.9.9 995\r\n#sstp-port 995\r\n"
+        val text = "*vpn_servers\r\n#HostName\r\n" +
+            "a,1.2.3.4,1,1,1,Japan,JP,1,1,1,1,2weeks,op,,${b64(withHint)}\r\n" +
+            "b,9.9.9.9,1,1,1,Viet Nam,VN,1,1,1,1,2weeks,op,,${b64(siteOnly)}\r\n*\r\n"
+        val list = VpnGateParser.parse(text)
+        assertEquals(1543, list[0].sstpPort)
+        assertEquals(995, list[1].sstpPort)
+        assertFalse(list[1].hasOpenVpn)
+    }
+
+    @Test
     fun flags() {
         assertEquals("🇯🇵", countryFlag("jp"))
         assertEquals("🌐", countryFlag("??"))

@@ -328,7 +328,7 @@ private fun ServerRow(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     (if (connected) "подключено · " else "") +
-                        "${formatSpeed(server.speedBps)} · ${server.sessions} сесс. · ${server.proto.uppercase()} ${server.port}",
+                        "${formatSpeed(server.speedBps)} · ${server.sessions} сесс. · " + (if (state.settings.protocol == com.example.vpngateclient.vpn.Protocol.OPENVPN) "${server.proto.uppercase()} ${server.port}" else "SSTP ${server.sstpPort}"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

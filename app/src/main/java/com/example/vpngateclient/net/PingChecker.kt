@@ -19,7 +19,10 @@ import java.net.Socket
 object PingChecker {
 
     suspend fun ping(server: VpnServer, timeoutMs: Int): Long? = withContext(Dispatchers.IO) {
-        val ports = if (server.proto == "tcp") {
+        val hint = server.sstpPortHint
+        val ports = if (hint != null) {
+            listOf(hint)
+        } else if (server.proto == "tcp") {
             listOf(server.port)
         } else {
             // У UDP-конфигов TCP-порт неизвестен — SoftEther обычно слушает эти
