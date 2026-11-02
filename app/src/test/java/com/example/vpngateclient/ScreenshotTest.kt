@@ -28,7 +28,7 @@ import org.robolectric.annotation.GraphicsMode
 /** Рисует основные экраны в PNG (./gradlew :app:recordRoborazziDebug). */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi-night", application = Application::class)
+@Config(sdk = [34], qualifiers = "w411dp-h891dp-night-xxhdpi", application = Application::class)
 class ScreenshotTest {
 
     @get:Rule
