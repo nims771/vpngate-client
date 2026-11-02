@@ -3,6 +3,9 @@ package com.example.vpngateclient.data
 import android.content.Context
 import com.example.vpngateclient.vpn.Protocol
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -163,25 +166,67 @@ class ServerRepository(context: Context) {
         if (servers.isNullOrEmpty()) null else CachedList(servers, cacheFile.lastModified())
     }
 
-    suspend fun download(url: String): List<VpnServer> = withContext(Dispatchers.IO) {
-        val text = httpGet(url)
-        val servers = VpnGateParser.parse(text)
-        if (servers.isEmpty()) throw IOException("список пуст или формат не распознан")
-        val tmp = File(cacheFile.parentFile, cacheFile.name + ".tmp")
-        tmp.writeText(text)
-        tmp.renameTo(cacheFile)
-        servers
+    /** Результат загрузки: список и адрес, с которого он реально получен. */
+    data class Downloaded(val servers: List<VpnServer>, val url: String)
+
+    /**
+     * Пробует адреса по очереди. На каждый — не больше [perUrlTimeoutMs] в сумме
+     * (DNS + соединение + чтение): заблокированный адрес больше не «подвешивает» обновление.
+     */
+    suspend fun download(urls: List<String>, perUrlTimeoutMs: Long = 35_000): Downloaded {
+        val errors = mutableListOf<String>()
+        for (url in urls.map { it.trim() }.filter { it.isNotEmpty() }.distinct()) {
+            try {
+                val text = fetchWithDeadline(url, perUrlTimeoutMs)
+                val servers = VpnGateParser.parse(text)
+                if (servers.isEmpty()) throw IOException("список пуст или формат не распознан")
+                withContext(Dispatchers.IO) {
+                    val tmp = File(cacheFile.parentFile, cacheFile.name + ".tmp")
+                    tmp.writeText(text)
+                    tmp.renameTo(cacheFile)
+                }
+                return Downloaded(servers, url)
+            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                errors += "${shortUrl(url)}: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+        throw IOException(errors.joinToString("; ").ifEmpty { "адрес списка не задан" })
     }
 
-    private fun httpGet(start: String): String {
-        var url = URL(start.trim())
+    private fun shortUrl(url: String) = runCatching { URL(url).host }.getOrDefault(url)
+
+    /**
+     * Сам запрос идёт в отдельной задаче; если общий срок вышел — бросаем её
+     * и закрываем соединение. Блокирующий DNS/сокет Android иначе не прервать.
+     */
+    private suspend fun fetchWithDeadline(url: String, timeoutMs: Long): String = coroutineScope {
+        val holder = arrayOfNulls<HttpURLConnection>(1)
+        val job = async(Dispatchers.IO) { httpGet(url, holder) }
+        try {
+            withTimeoutOrNull(timeoutMs) { job.await() }
+                ?: throw IOException("нет ответа за ${timeoutMs / 1000} с (адрес заблокирован или недоступен)")
+        } finally {
+            if (!job.isCompleted) {
+                runCatching { holder[0]?.disconnect() }
+                job.cancel()
+            }
+        }
+    }
+
+    private fun httpGet(start: String, holder: Array<HttpURLConnection?>): String {
+        var url = URL(start)
         repeat(5) {
             val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 30_000
+                connectTimeout = 12_000
+                readTimeout = 15_000
                 instanceFollowRedirects = false // сами обрабатываем, в т.ч. http -> https
+                useCaches = false
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) VpnGateClient/1.0")
+                setRequestProperty("Cache-Control", "no-cache")
             }
+            holder[0] = conn
             try {
                 val code = conn.responseCode
                 if (code in 300..399) {

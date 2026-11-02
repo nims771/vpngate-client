@@ -195,15 +195,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- список ----------
 
+    private var refreshJob: Job? = null
+
+    /** Обновить список. Повторное нажатие перезапускает загрузку (старая отменяется). */
     fun refresh() {
-        if (_state.value.loading) return
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        val job = viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
             try {
-                val list = repo.download(_state.value.settings.listUrl)
+                val own = _state.value.settings.listUrl.trim()
+                // Сначала адрес из настроек, при неудаче — стандартный vpngate.net
+                val urls = listOf(own, AppSettings.DEFAULT_URL).distinct()
+                val result = repo.download(urls)
+                val list = result.servers
                 setServers(list, System.currentTimeMillis(), fromCache = false)
                 _state.update { it.copy(loading = false) }
-                msg("Список обновлён: ${list.size} серверов")
+                msg(
+                    if (result.url != own) "Ваш адрес не ответил — список взят с vpngate.net (${list.size} серверов)"
+                    else "Список обновлён: ${list.size} серверов"
+                )
                 // Через работающий VPN пинг неточен и забирает скорость — не проверяем автоматически
                 if (_state.value.settings.autoPing && !vpn.status.value.isActive) pingAll()
             } catch (e: CancellationException) {
@@ -214,8 +224,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (hasCache) ". Показан сохранённый список." else ""
                 _state.update { it.copy(loading = false, error = text) }
                 msg(text)
+            } finally {
+                // если эту загрузку отменили новым нажатием — индикатор не трогаем
+                if (refreshJob == coroutineContext[Job]) _state.update { it.copy(loading = false) }
             }
         }
+        refreshJob = job
     }
 
     private fun setServers(list: List<VpnServer>, time: Long, fromCache: Boolean) {
@@ -527,8 +541,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setQuery(q: String) = _state.update { it.copy(query = q) }
 
     fun updateSettings(s: AppSettings) {
+        val urlChanged = s.listUrl.trim() != _state.value.settings.listUrl.trim()
         settingsStore.save(s)
         _state.update { it.copy(settings = s) }
+        if (urlChanged) refresh() // новый адрес — сразу пробуем загрузить с него
     }
 
     private suspend fun msg(text: String) = _events.send(UiEvent.Message(text))
