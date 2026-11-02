@@ -77,7 +77,11 @@ class ScreenshotTest {
     @Test
     fun homeConnected() = shot("1_home_connected") {
         HomeScreen(
-            state = baseState.copy(connectedSince = System.currentTimeMillis() - 6_000),
+            state = baseState.copy(
+                connectedSince = System.currentTimeMillis() - 6_000,
+                speeds = mapOf("vpn458682530" to 14.2),
+                tunnelLatency = 262L,
+            ),
             status = VpnStatus(
                 level = "LEVEL_CONNECTED", serverId = "vpn458682530",
                 serverName = "🇯🇵 Japan · vpn458682530", protocol = "SSTP",

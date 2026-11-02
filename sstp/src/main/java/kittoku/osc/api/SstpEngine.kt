@@ -42,6 +42,8 @@ object SstpEngine {
         /** Запасной DNS, если сервер свой не выдаст. */
         val dns: String? = "8.8.8.8",
         val serverName: String? = null,
+        /** MTU туннеля. 1400 надёжнее 1500: меньше шанс, что крупные пакеты потеряются по пути. */
+        val mtu: Int = 1400,
     )
 
     private val _state = MutableStateFlow(State())
@@ -69,6 +71,8 @@ object SstpEngine {
             .putString(OscPrefKey.HOME_USERNAME.name, config.username)
             .putString(OscPrefKey.HOME_PASSWORD.name, config.password)
             .putString(OscPrefKey.SSL_PORT.name, config.port.toString()) // движок хранит числа строками
+            .putString(OscPrefKey.PPP_MTU.name, config.mtu.coerceIn(576, 1500).toString())
+            .putString(OscPrefKey.PPP_MRU.name, config.mtu.coerceIn(576, 1500).toString())
             .putBoolean(OscPrefKey.SSL_DO_VERIFY.name, false) // имя хоста не проверяем: подключаемся по IP
             .putBoolean(OscPrefKey.SSL_DO_SPECIFY_CERT.name, config.trustAllCertificates)
             .putBoolean(OscPrefKey.SSL_DO_USE_CUSTOM_SNI.name, config.sni != null && config.sendSni)

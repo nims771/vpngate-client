@@ -157,6 +157,8 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                     onToggle = vm::toggleConnection,
                     onOpenLocations = { tab = TAB_COUNTRIES },
                     onRefresh = vm::refresh,
+                    onSpeedTest = vm::runSpeedTest,
+                    onSwitchServer = vm::switchServer,
                 )
 
                 TAB_COUNTRIES -> CountriesScreen(

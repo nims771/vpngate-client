@@ -106,6 +106,14 @@ fun SettingsScreen(
                 settings.sstpTrustAll,
                 subtitle = "Включайте, если в журнале CERT_PATH: ERR_VERIFICATION_FAILED",
             ) { onChange(settings.copy(sstpTrustAll = it)) }
+            Text("MTU туннеля: ${settings.sstpMtu}", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 6.dp))
+            Slider(
+                value = settings.sstpMtu.toFloat(),
+                onValueChange = { onChange(settings.copy(sstpMtu = ((it / 50f).roundToInt() * 50).coerceIn(1200, 1500))) },
+                valueRange = 1200f..1500f,
+                steps = 5,
+            )
+            Hint("1400 подходит почти всем. Если сайты открываются частично или зависают — попробуйте 1300.")
         }
 
         // ---- Серверы ----

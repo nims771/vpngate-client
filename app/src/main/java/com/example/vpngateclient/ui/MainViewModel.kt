@@ -14,6 +14,7 @@ import com.example.vpngateclient.data.ServerRepository
 import com.example.vpngateclient.data.SettingsStore
 import com.example.vpngateclient.data.VpnServer
 import com.example.vpngateclient.net.PingChecker
+import com.example.vpngateclient.net.SpeedTest
 import com.example.vpngateclient.vpn.ConnectResult
 import com.example.vpngateclient.vpn.OvpnConfig
 import com.example.vpngateclient.vpn.Protocol
@@ -62,6 +63,12 @@ data class UiState(
     val attemptInfo: String? = null,
     /** Время, с которого туннель подключён (для таймера). */
     val connectedSince: Long = 0L,
+    /** Идёт проверка скорости. */
+    val speedTesting: Boolean = false,
+    /** Измеренная скорость по серверам: id -> Мбит/с. */
+    val speeds: Map<String, Double> = emptyMap(),
+    /** Задержка через туннель (мс) последнего теста. */
+    val tunnelLatency: Long? = null,
 )
 
 sealed interface UiEvent {
@@ -78,9 +85,28 @@ data class CountryGroup(
 )
 
 /** Чем меньше, тем лучше: пинг + штрафы за медленный канал и нагрузку. */
-fun serverCost(server: VpnServer, ping: Long): Long {
-    val slowPenalty = if (server.speedBps < 10_000_000) 150 else 0
-    return ping + slowPenalty + server.sessions.coerceAtMost(60) * 3L
+/**
+ * Чем меньше, тем лучше. Учитываем не только пинг: у добровольческих серверов
+ * VPN Gate узкое место — канал и число пользователей.
+ * measuredMbps — скорость, которую мы сами намерили через этот сервер.
+ */
+fun serverCost(server: VpnServer, ping: Long, measuredMbps: Double? = null): Long {
+    val mbps = server.speedBps / 1_000_000
+    val linePenalty = when {
+        mbps < 10 -> 250
+        mbps < 50 -> 120
+        mbps < 100 -> 50
+        else -> 0
+    }
+    val loadPenalty = server.sessions.coerceAtMost(80) * 6L
+    val measuredPenalty = when {
+        measuredMbps == null -> 0
+        measuredMbps < 1.0 -> 400
+        measuredMbps < 3.0 -> 200
+        measuredMbps < 8.0 -> 60
+        else -> -40 // проверенный быстрый — чуть выше в списке
+    }
+    return ping + linePenalty + loadPenalty + measuredPenalty
 }
 
 fun pingSortKey(p: Long?): Long = when {
@@ -161,7 +187,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (cached == null || (stale && _state.value.settings.autoRefresh)) {
                 refresh()
-            } else if (_state.value.settings.autoPing && connectJob?.isActive != true) {
+            } else if (_state.value.settings.autoPing && connectJob?.isActive != true && !vpn.status.value.isActive) {
                 pingAll()
             }
         }
@@ -178,7 +204,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 setServers(list, System.currentTimeMillis(), fromCache = false)
                 _state.update { it.copy(loading = false) }
                 msg("Список обновлён: ${list.size} серверов")
-                if (_state.value.settings.autoPing) pingAll()
+                // Через работающий VPN пинг неточен и забирает скорость — не проверяем автоматически
+                if (_state.value.settings.autoPing && !vpn.status.value.isActive) pingAll()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -219,6 +246,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Проверить все серверы (и избранные, которых нет в списке). */
     fun pingAll() {
+        if (vpn.status.value.isActive) {
+            viewModelScope.launch { msg("VPN включён: пинг пойдёт через туннель и будет выше реального") }
+        }
         val st = _state.value
         val targets = (st.servers + st.favorites.values).distinctBy { it.id }
         startPing(targets)
@@ -350,7 +380,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun tryConnect(server: VpnServer): Attempt {
         val settings = _state.value.settings
-        suspend fun start() = vpn.connect(server, settings.protocol, settings.sstpTrustAll, settings.sstpSendSni)
+        suspend fun start() =
+            vpn.connect(server, settings.protocol, settings.sstpTrustAll, settings.sstpSendSni, settings.sstpMtu)
 
         var result = start()
         if (result is ConnectResult.NeedPermission) {
@@ -408,12 +439,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         val pings = _state.value.pings
         val alive = base.filter { (pings[it.id] ?: -1L) > 0 }
+        val speeds = _state.value.speeds
         return if (alive.isNotEmpty()) {
-            alive.sortedBy { serverCost(it, pings.getValue(it.id)) }
+            alive.sortedBy { serverCost(it, pings.getValue(it.id), speeds[it.id]) }
         } else {
             // Пинг мог не пройти (например, через работающий VPN) — пробуем по рейтингу
             base.sortedByDescending { it.score }
         }
+    }
+
+    private var speedJob: Job? = null
+
+    /** Проверка скорости через текущее подключение. */
+    fun runSpeedTest() {
+        val status = vpn.status.value
+        if (!status.isConnected || speedJob?.isActive == true) return
+        val serverId = status.serverId
+        speedJob = viewModelScope.launch {
+            _state.update { it.copy(speedTesting = true) }
+            try {
+                val result = SpeedTest.run()
+                if (result == null) {
+                    msg("Не удалось измерить скорость — сайты для теста не ответили")
+                } else {
+                    _state.update {
+                        it.copy(
+                            speeds = if (serverId != null) it.speeds + (serverId to result.mbps) else it.speeds,
+                            tunnelLatency = result.latencyMs,
+                        )
+                    }
+                    if (result.mbps < 3.0 && _state.value.selection !is Selection.Server) {
+                        msg("Сервер медленный. Нажмите «Сменить сервер» — автовыбор возьмёт другой.")
+                    }
+                }
+            } finally {
+                _state.update { it.copy(speedTesting = false) }
+            }
+        }
+    }
+
+    /** Переподключиться к следующему лучшему серверу (текущий помечается как медленный). */
+    fun switchServer() {
+        val current = vpn.status.value.serverId
+        if (current != null) {
+            _state.update { it.copy(speeds = it.speeds + (current to minOf(it.speeds[current] ?: 0.5, 0.5))) }
+        }
+        if (_state.value.selection is Selection.Server) select(Selection.Auto) else connectSelected()
     }
 
     fun onPermissionResult(granted: Boolean) {

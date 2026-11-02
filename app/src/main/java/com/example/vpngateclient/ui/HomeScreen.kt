@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -55,6 +57,8 @@ fun HomeScreen(
     onToggle: () -> Unit,
     onOpenLocations: () -> Unit,
     onRefresh: () -> Unit,
+    onSpeedTest: () -> Unit = {},
+    onSwitchServer: () -> Unit = {},
 ) {
     val powerState = when {
         status.isConnected -> PowerState.CONNECTED
@@ -128,6 +132,11 @@ fun HomeScreen(
 
         Spacer(Modifier.height(24.dp))
         LocationCard(state, findServer, onOpenLocations)
+
+        if (status.isConnected) {
+            Spacer(Modifier.height(12.dp))
+            SpeedCard(state, status, onSpeedTest, onSwitchServer)
+        }
 
         Spacer(Modifier.height(12.dp))
         Row(
@@ -242,6 +251,51 @@ private fun LocationCard(state: UiState, findServer: (String) -> VpnServer?, onC
                 contentDescription = "Выбрать страну",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun SpeedCard(state: UiState, status: VpnStatus, onSpeedTest: () -> Unit, onSwitchServer: () -> Unit) {
+    val mbps = status.serverId?.let { state.speeds[it] }
+    SectionCard(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Скорость", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    when {
+                        state.speedTesting -> "измеряем…"
+                        mbps != null -> String.format(java.util.Locale.forLanguageTag("ru"), "%.1f Мбит/с", mbps)
+                        else -> "не проверялась"
+                    },
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = when {
+                        mbps == null || state.speedTesting -> MaterialTheme.colorScheme.onSurface
+                        mbps < 3 -> MaterialTheme.colorScheme.error
+                        mbps < 10 -> Amber
+                        else -> Green
+                    },
+                )
+                state.tunnelLatency?.takeIf { mbps != null && !state.speedTesting }?.let {
+                    Text(
+                        "задержка через VPN: $it мс",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                TextButton(onClick = onSpeedTest, enabled = !state.speedTesting) {
+                    Icon(Icons.Default.Speed, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Проверить")
+                }
+                TextButton(onClick = onSwitchServer, enabled = !state.connecting) {
+                    Icon(Icons.Default.SwapHoriz, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Сменить сервер")
+                }
+            }
         }
     }
 }

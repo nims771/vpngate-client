@@ -28,6 +28,8 @@ data class AppSettings(
     val autoConnect: Boolean = false,
     /** Сколько серверов перебирать при автовыборе, если подключение не удалось. */
     val maxAttempts: Int = 5,
+    /** MTU туннеля SSTP. */
+    val sstpMtu: Int = 1400,
 ) {
     companion object {
         const val DEFAULT_URL = "http://www.vpngate.net/api/iphone/"
@@ -50,6 +52,7 @@ class SettingsStore(context: Context) {
         sstpSendSni = sp.getBoolean("sstpSendSni", false),
         autoConnect = sp.getBoolean("autoConnect", false),
         maxAttempts = sp.getInt("maxAttempts", 5),
+        sstpMtu = sp.getInt("sstpMtu", 1400),
     )
 
     fun save(s: AppSettings) {
@@ -64,6 +67,7 @@ class SettingsStore(context: Context) {
             .putBoolean("sstpSendSni", s.sstpSendSni)
             .putBoolean("autoConnect", s.autoConnect)
             .putInt("maxAttempts", s.maxAttempts)
+            .putInt("sstpMtu", s.sstpMtu)
             .apply()
     }
 }

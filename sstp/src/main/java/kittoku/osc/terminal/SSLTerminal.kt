@@ -125,6 +125,10 @@ internal class SSLTerminal(private val bridge: SharedBridge) {
         val socketHostname = if (doUseProxy) getStringPrefValue(OscPrefKey.PROXY_HOSTNAME, bridge.prefs) else sslHostname
         val socketPort = if (doUseProxy) getIntPrefValue(OscPrefKey.PROXY_PORT, bridge.prefs) else sslPort
         socket = Socket().also {
+            // Изменено для VPN Gate Client: без задержки Нейгла. Иначе мелкие пакеты
+            // (ACK, DNS, TLS-рукопожатия сайтов) копятся до RTT ~250 мс — сайты «тормозят».
+            it.tcpNoDelay = true
+            it.keepAlive = true
             it.connect(java.net.InetSocketAddress(socketHostname, socketPort), 15_000)
         }.also {
             socketInputStream = it.getInputStream()
