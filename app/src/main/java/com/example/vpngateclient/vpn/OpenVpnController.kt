@@ -90,11 +90,25 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
             .getOrDefault(emptyList()).takeLast(MAX_LOG)
         EngineStatus.addLogListener(this)
         EngineStatus.addStateListener(this)
+        checkCrashFile()
     }
 
     override fun newLog(logItem: LogItem) {
         val line = formatLog(logItem)
         _log.update { (it + line).takeLast(MAX_LOG) }
+        checkCrashFile()
+    }
+
+    /** Если служба VPN упала, App записал текст ошибки в файл — показываем его в журнале. */
+    private fun checkCrashFile() {
+        val file = java.io.File(appContext.filesDir, com.example.vpngateclient.App.CRASH_FILE)
+        if (!file.exists()) return
+        val text = runCatching { file.readText() }.getOrNull()
+        file.delete()
+        if (!text.isNullOrBlank()) {
+            val lines = text.lines().filter { it.isNotBlank() }.take(25)
+            _log.update { (it + ("!!! СБОЙ:\n" + lines.joinToString("\n"))).takeLast(MAX_LOG) }
+        }
     }
 
     private fun formatLog(item: LogItem): String {
