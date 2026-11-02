@@ -15,7 +15,9 @@ android {
     ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        minSdk = 26
+        // Как в оригинале: при API >= 23 заголовки NDK конфликтуют с compat-кодом OpenVPN 2
+        // (basename). Само приложение всё равно требует Android 8.0+.
+        minSdk = 21
         // Используем классический OpenVPN 2 (лучше всего совместим с VPN Gate)
         buildConfigField("boolean", "openvpn3", "false")
         // В оригинале это имя product flavor; код движка проверяет его
