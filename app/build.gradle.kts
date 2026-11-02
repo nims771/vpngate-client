@@ -16,8 +16,8 @@ android {
         applicationId = "com.example.vpngateclient"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "2.2"
+        versionCode = 5
+        versionName = "3.0"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
@@ -72,6 +72,7 @@ kotlin {
 
 dependencies {
     implementation(project(":openvpn"))
+    implementation(project(":sstp"))
 
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)

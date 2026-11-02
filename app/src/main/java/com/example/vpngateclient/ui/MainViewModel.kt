@@ -235,8 +235,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun connect(server: VpnServer) {
         viewModelScope.launch {
             pendingConnect = server
-            val name = "${server.flag} ${server.countryLong} · ${server.hostName}"
-            when (val r = vpn.connect(OvpnConfig.prepare(server.config), server.id, name)) {
+            val settings = _state.value.settings
+            when (val r = vpn.connect(server, settings.protocol, settings.sstpTrustAll)) {
                 is ConnectResult.NeedPermission -> {
                     if (permissionRounds++ < 3) {
                         _events.send(UiEvent.LaunchIntent(r.intent))

@@ -8,3 +8,6 @@
 }
 -dontwarn de.blinkt.openvpn.**
 -dontwarn net.openvpn.**
+
+# SSTP-движок (Open SSTP Client): оставляем как есть
+-keep class kittoku.osc.** { *; }

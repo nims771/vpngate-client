@@ -1,6 +1,7 @@
 package com.example.vpngateclient.data
 
 import android.content.Context
+import com.example.vpngateclient.vpn.Protocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -18,6 +19,9 @@ data class AppSettings(
     val pingParallel: Int = 16,
     val autoPing: Boolean = true,
     val autoRefresh: Boolean = true,
+    val protocol: Protocol = Protocol.AUTO,
+    /** Доверять самоподписанным сертификатам SSTP-серверов. */
+    val sstpTrustAll: Boolean = false,
 ) {
     companion object {
         const val DEFAULT_URL = "http://www.vpngate.net/api/iphone/"
@@ -33,6 +37,9 @@ class SettingsStore(context: Context) {
         pingParallel = sp.getInt("pingParallel", 16),
         autoPing = sp.getBoolean("autoPing", true),
         autoRefresh = sp.getBoolean("autoRefresh", true),
+        protocol = runCatching { Protocol.valueOf(sp.getString("protocol", null) ?: "AUTO") }
+            .getOrDefault(Protocol.AUTO),
+        sstpTrustAll = sp.getBoolean("sstpTrustAll", false),
     )
 
     fun save(s: AppSettings) {
@@ -42,6 +49,8 @@ class SettingsStore(context: Context) {
             .putInt("pingParallel", s.pingParallel)
             .putBoolean("autoPing", s.autoPing)
             .putBoolean("autoRefresh", s.autoRefresh)
+            .putString("protocol", s.protocol.name)
+            .putBoolean("sstpTrustAll", s.sstpTrustAll)
             .apply()
     }
 }

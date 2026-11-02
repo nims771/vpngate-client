@@ -18,6 +18,17 @@
 
 ## Как устроено подключение
 
+Есть два встроенных протокола (выбираются в настройках):
+
+- **SSTP** — трафик выглядит как обычный HTTPS (порт 443 или TCP-порт сервера), поэтому
+  часто проходит там, где OpenVPN блокируется. Используется ядро
+  [Open SSTP Client](https://github.com/kittoku/Open-SSTP-Client) (MIT, KOBAYASHI Ittoku),
+  модуль `sstp/`. Логин/пароль VPN Gate: `vpn` / `vpn`.
+- **OpenVPN** — см. ниже.
+- **Авто** (по умолчанию) — сначала SSTP, при неудаче OpenVPN.
+
+### OpenVPN
+
 VPN встроен прямо в приложение, сторонние программы не нужны. Внутри работает движок проекта
 [OpenVPN for Android](https://github.com/schwabe/ics-openvpn) (Arne Schwabe), версия 0.7.63
 с классическим OpenVPN 2.x. Он подключён как git-подмодуль `ics-openvpn/` и собирается вместе
@@ -59,6 +70,7 @@ Release-сборка подписана debug-ключом, чтобы её мо
 ```
 ics-openvpn/                       подмодуль: движок OpenVPN for Android
 openvpn/                           модуль-обёртка, собирает движок как библиотеку
+sstp/                              SSTP-клиент (ядро Open SSTP Client, MIT)
 app/src/main/
 ├── java/com/example/vpngateclient/
 │   ├── data/VpnGateParser.kt     разбор CSV VPN Gate

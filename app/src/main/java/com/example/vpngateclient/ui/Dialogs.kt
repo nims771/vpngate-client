@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -30,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -50,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.vpngateclient.data.AppSettings
 import com.example.vpngateclient.data.VpnServer
+import com.example.vpngateclient.vpn.Protocol
 import kotlin.math.roundToInt
 
 // ---------- Подробности о сервере ----------
@@ -193,12 +196,36 @@ fun SettingsDialog(
     var parallel by remember { mutableFloatStateOf(current.pingParallel.toFloat()) }
     var autoPing by remember { mutableStateOf(current.autoPing) }
     var autoRefresh by remember { mutableStateOf(current.autoRefresh) }
+    var protocol by remember { mutableStateOf(current.protocol) }
+    var sstpTrustAll by remember { mutableStateOf(current.sstpTrustAll) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Настройки") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Протокол подключения", style = MaterialTheme.typography.titleSmall)
+                Protocol.entries.forEach { p ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = protocol == p, onClick = { protocol = p })
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = protocol == p, onClick = { protocol = p })
+                        Text(p.label, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Text(
+                    "SSTP маскируется под обычный HTTPS и чаще проходит через блокировки. " +
+                        "OpenVPN во многих сетях блокируется.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                SwitchRow("SSTP: доверять самоподписанным сертификатам", sstpTrustAll) { sstpTrustAll = it }
+                Spacer(Modifier.height(12.dp))
+
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
@@ -243,6 +270,8 @@ fun SettingsDialog(
                         pingParallel = parallel.roundToInt(),
                         autoPing = autoPing,
                         autoRefresh = autoRefresh,
+                        protocol = protocol,
+                        sstpTrustAll = sstpTrustAll,
                     )
                 )
             }) { Text("Сохранить") }

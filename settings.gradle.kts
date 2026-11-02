@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "VpnGateClient"
 include(":app")
 include(":openvpn")
+include(":sstp")

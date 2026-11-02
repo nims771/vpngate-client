@@ -96,7 +96,7 @@ fun StatusCard(
                 Text(status.title, style = MaterialTheme.typography.titleMedium)
                 val sub = when {
                     status.isActive && status.serverName != null ->
-                        status.serverName + if (status.isConnecting && lastLog != null) "\n${lastLog.substringAfter("  ")}" else ""
+                        status.serverName + (status.protocol?.let { " · $it" } ?: "") + if (status.isConnecting && lastLog != null) "\n${lastLog.substringAfter("  ")}" else ""
                     status.level == "LEVEL_AUTH_FAILED" -> "Сервер отклонил подключение — выберите другой"
                     else -> "Выберите сервер или нажмите «Лучший»"
                 }
