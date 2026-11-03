@@ -206,7 +206,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val own = _state.value.settings.listUrl.trim()
                 // Сначала адрес из настроек, при неудаче — стандартный vpngate.net
                 val urls = listOf(own, AppSettings.DEFAULT_URL).distinct()
-                val result = repo.download(urls)
+                // запасной предохранитель: что бы ни случилось внутри, колесо не крутится дольше 45 с
+                val result = withTimeoutOrNull(45_000) { repo.download(urls) }
+                    ?: throw java.io.IOException("нет ответа за 45 с")
                 val list = result.servers
                 setServers(list, System.currentTimeMillis(), fromCache = false)
                 _state.update { it.copy(loading = false) }

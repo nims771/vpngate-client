@@ -18,8 +18,8 @@ android {
         applicationId = "com.example.vpngateclient"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "3.3"
+        versionCode = 12
+        versionName = "3.3.1"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }

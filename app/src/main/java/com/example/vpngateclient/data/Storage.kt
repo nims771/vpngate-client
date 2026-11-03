@@ -2,9 +2,12 @@ package com.example.vpngateclient.data
 
 import android.content.Context
 import com.example.vpngateclient.vpn.Protocol
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -172,49 +175,86 @@ class ServerRepository(context: Context) {
     data class Downloaded(val servers: List<VpnServer>, val url: String)
 
     /**
-     * Пробует адреса по очереди. На каждый — не больше [perUrlTimeoutMs] в сумме
-     * (DNS + соединение + чтение): заблокированный адрес больше не «подвешивает» обновление.
+     * Запросы идут в отдельной области корутин, не привязанной к вызывающему:
+     * на Android блокирующий DNS-запрос и установку соединения прервать нельзя,
+     * поэтому по истечении срока мы просто перестаём ждать (поток доработает сам и закроется).
      */
-    suspend fun download(urls: List<String>, perUrlTimeoutMs: Long = 35_000): Downloaded {
-        val errors = mutableListOf<String>()
-        for (url in urls.map { it.trim() }.filter { it.isNotEmpty() }.distinct()) {
-            try {
-                val text = fetchWithDeadline(url, perUrlTimeoutMs)
-                val servers = VpnGateParser.parse(text)
-                if (servers.isEmpty()) throw IOException("список пуст или формат не распознан")
-                withContext(Dispatchers.IO) {
-                    val tmp = File(cacheFile.parentFile, cacheFile.name + ".tmp")
-                    tmp.writeText(text)
-                    tmp.renameTo(cacheFile)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private class Attempt(val url: String) {
+        val conn = arrayOfNulls<HttpURLConnection>(1)
+        lateinit var result: Deferred<Result<Pair<String, List<VpnServer>>>>
+    }
+
+    /**
+     * Загружает список сразу со всех адресов параллельно и берёт ответ
+     * по приоритету (первый адрес — главный). Общий срок — [timeoutMs].
+     */
+    suspend fun download(urls: List<String>, timeoutMs: Long = 25_000): Downloaded {
+        val list = urls.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (list.isEmpty()) throw IOException("адрес списка не задан")
+
+        val attempts = list.map { url ->
+            Attempt(url).also { a ->
+                a.result = ioScope.async {
+                    runCatching {
+                        val text = httpGet(url, a.conn)
+                        val servers = VpnGateParser.parse(text)
+                        if (servers.isEmpty()) throw IOException("список пуст или формат не распознан")
+                        text to servers
+                    }
                 }
-                return Downloaded(servers, url)
-            } catch (e: kotlin.coroutines.cancellation.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                errors += "${shortUrl(url)}: ${e.message ?: e.javaClass.simpleName}"
             }
         }
-        throw IOException(errors.joinToString("; ").ifEmpty { "адрес списка не задан" })
+
+        val winner = try {
+            withTimeoutOrNull(timeoutMs) { awaitWinner(attempts) }
+        } finally {
+            // всё, что ещё висит, бросаем и закрываем — не дожидаясь
+            attempts.filter { !it.result.isCompleted }.forEach {
+                runCatching { it.conn[0]?.disconnect() }
+                it.result.cancel()
+            }
+        }
+
+        if (winner != null) {
+            val (text, servers) = winner.result.await().getOrThrow()
+            withContext(Dispatchers.IO) {
+                val tmp = File(cacheFile.parentFile, cacheFile.name + ".tmp")
+                tmp.writeText(text)
+                tmp.renameTo(cacheFile)
+            }
+            return Downloaded(servers, winner.url)
+        }
+
+        val reasons = attempts.map { a ->
+            val r = if (a.result.isCompleted && !a.result.isCancelled) a.result.await() else null
+            val why = r?.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName }
+                ?: "нет ответа за ${timeoutMs / 1000} с"
+            "${shortUrl(a.url)}: $why"
+        }
+        throw IOException(reasons.joinToString("; "))
+    }
+
+    /** Первый успешный по приоритету; запасной берём, если главный не ответил за 6 с. */
+    private suspend fun awaitWinner(attempts: List<Attempt>): Attempt? {
+        val start = System.currentTimeMillis()
+        while (true) {
+            for (a in attempts) {
+                if (!a.result.isCompleted) {
+                    if (System.currentTimeMillis() - start < PRIMARY_GRACE_MS) break else continue
+                }
+                if (a.result.await().isSuccess) return a
+            }
+            if (attempts.all { it.result.isCompleted }) return null
+            delay(150)
+        }
     }
 
     private fun shortUrl(url: String) = runCatching { URL(url).host }.getOrDefault(url)
 
-    /**
-     * Сам запрос идёт в отдельной задаче; если общий срок вышел — бросаем её
-     * и закрываем соединение. Блокирующий DNS/сокет Android иначе не прервать.
-     */
-    private suspend fun fetchWithDeadline(url: String, timeoutMs: Long): String = coroutineScope {
-        val holder = arrayOfNulls<HttpURLConnection>(1)
-        val job = async(Dispatchers.IO) { httpGet(url, holder) }
-        try {
-            withTimeoutOrNull(timeoutMs) { job.await() }
-                ?: throw IOException("нет ответа за ${timeoutMs / 1000} с (адрес заблокирован или недоступен)")
-        } finally {
-            if (!job.isCompleted) {
-                runCatching { holder[0]?.disconnect() }
-                job.cancel()
-            }
-        }
+    private companion object {
+        const val PRIMARY_GRACE_MS = 6_000L
     }
 
     private fun httpGet(start: String, holder: Array<HttpURLConnection?>): String {
