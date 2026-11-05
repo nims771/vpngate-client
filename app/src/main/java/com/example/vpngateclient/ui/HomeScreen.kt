@@ -104,7 +104,7 @@ fun HomeScreen(
             else -> selectionTitle(state, findServer).let { "${it.first} ${it.second}" }
         }
         Text(
-            serverLine,
+            withFlags(serverLine),
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -125,7 +125,7 @@ fun HomeScreen(
                 val ping = status.serverId?.let { state.pings[it] }?.takeIf { it > 0 }
                 listOfNotNull(status.protocol, ping?.let { "пинг $it мс" }).joinToString(" · ")
             }
-            status.stepFailed && status.message.isNotBlank() -> status.message
+            status.stepFailed && status.steps.isNotEmpty() -> "Попробуйте другой сервер или нажмите кнопку ещё раз"
             status.level == "LEVEL_AUTH_FAILED" -> "Сервер отклонил подключение — выберите другой"
             else -> "Нажмите кнопку, чтобы подключиться"
         }
