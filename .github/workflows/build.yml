@@ -86,6 +86,10 @@ jobs:
       - name: Build MSI and portable app
         run: ./gradlew :desktop:packageMsi :desktop:createDistributable
 
+      - name: Show packaging logs
+        if: failure()
+        run: cat desktop/build/compose/logs/*/*.txt || true
+
       - name: Collect files
         run: |
           mkdir -p dist

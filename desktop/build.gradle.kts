@@ -75,7 +75,7 @@ compose.desktop {
             targetFormats(TargetFormat.Msi)
             packageName = "VPN Gate Client"
             packageVersion = appVersion
-            description = "Клиент для бесплатных серверов VPN Gate"
+            description = "Client for free VPN Gate servers"
             vendor = "VPN Gate Client"
             copyright = "GPL v2"
             // все модули JDK — надёжнее, чем угадывать (TLS, сеть, AWT)
