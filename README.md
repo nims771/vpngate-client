@@ -1,4 +1,4 @@
-# VPN Gate Client для Android
+# VPN Gate Client для Android и Windows
 
 Клиент для бесплатных серверов [VPN Gate](https://www.vpngate.net/) на Kotlin и Jetpack Compose.
 
@@ -36,6 +36,24 @@ VPN встроен прямо в приложение, сторонние про
 
 При первом подключении Android один раз спросит разрешение на VPN, нажмите OK.
 Пока туннель работает, в шторке висит уведомление со статусом и кнопкой отключения.
+
+## Windows
+
+Та же программа для Windows 10/11 (папка `desktop/`, Compose Desktop): общие экраны, список стран,
+пинг, автовыбор и перебор серверов. Скачать в Releases:
+
+- `VpnGateClient-Windows.msi` — установщик (ставится для текущего пользователя, ярлык в «Пуске»);
+- `VpnGateClient-Windows-portable.zip` — без установки, запуск `VPN Gate Client.exe`.
+
+Подключение — средствами Windows, без своих драйверов:
+
+- **SoftEther** (рекомендуется) — через установленный [SoftEther VPN Client](https://www.softether-download.com/):
+  программа сама создаёт в нём подключение `VPNGateClient` (хаб VPNGATE, анонимный вход) и управляет им через `vpncmd`;
+- **SSTP** — встроенный клиент Windows (`Add-VpnConnection` + `rasdial`, логин vpn/vpn), ничего ставить не нужно.
+  При ошибке 0x80092013 нажмите в настройках «Отключить проверку отзыва для SSTP».
+
+Закрытие окна при активном VPN сворачивает программу в область уведомлений; «Выход» в меню значка отключает VPN.
+Данные хранятся в `%APPDATA%\VpnGateClient`.
 
 ## Сборка
 

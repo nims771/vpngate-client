@@ -1,6 +1,5 @@
 package com.example.vpngateclient.data
 
-import android.content.Context
 import com.example.vpngateclient.vpn.Protocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -42,40 +41,16 @@ data class AppSettings(
     }
 }
 
-class SettingsStore(context: Context) {
-    private val sp = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+/** Хранилище настроек (на Android — SharedPreferences, на Windows — файл). */
+interface SettingsPersistence {
+    fun load(): AppSettings
+    fun save(s: AppSettings)
+}
 
-    fun load() = AppSettings(
-        listUrl = sp.getString("listUrl", null)?.takeIf { it.isNotBlank() } ?: AppSettings.DEFAULT_URL,
-        pingTimeoutMs = sp.getInt("pingTimeout3", 3000),
-        pingParallel = sp.getInt("pingParallel3", 12),
-        autoPing = sp.getBoolean("autoPing", true),
-        autoRefresh = sp.getBoolean("autoRefresh", true),
-        // ключ сменён в 3.1: по умолчанию теперь SSTP (OpenVPN часто блокируется)
-        protocol = runCatching { Protocol.valueOf(sp.getString("protocol3", null) ?: "SSTP") }
-            .getOrDefault(Protocol.SSTP),
-        sstpTrustAll = sp.getBoolean("sstpTrustAll", false),
-        sstpSendSni = sp.getBoolean("sstpSendSni", false),
-        autoConnect = sp.getBoolean("autoConnect", false),
-        maxAttempts = sp.getInt("maxAttempts", 5),
-        sstpMtu = sp.getInt("sstpMtu", 1400),
-    )
-
-    fun save(s: AppSettings) {
-        sp.edit()
-            .putString("listUrl", s.listUrl)
-            .putInt("pingTimeout3", s.pingTimeoutMs)
-            .putInt("pingParallel3", s.pingParallel)
-            .putBoolean("autoPing", s.autoPing)
-            .putBoolean("autoRefresh", s.autoRefresh)
-            .putString("protocol3", s.protocol.name)
-            .putBoolean("sstpTrustAll", s.sstpTrustAll)
-            .putBoolean("sstpSendSni", s.sstpSendSni)
-            .putBoolean("autoConnect", s.autoConnect)
-            .putInt("maxAttempts", s.maxAttempts)
-            .putInt("sstpMtu", s.sstpMtu)
-            .apply()
-    }
+/** Простое хранилище строк «ключ → значение». */
+interface KeyValueStore {
+    fun getString(key: String): String?
+    fun putString(key: String, value: String)
 }
 
 // ---------- Выбор сервера ----------
@@ -106,8 +81,8 @@ sealed interface Selection {
 // Храним сервер целиком (с конфигом), чтобы избранное работало,
 // даже когда сервер пропал из свежего списка.
 
-class FavoritesStore(context: Context) {
-    private val file = File(context.filesDir, "favorites.json")
+class FavoritesStore(dir: File) {
+    private val file = File(dir.apply { mkdirs() }, "favorites.json")
 
     fun load(): Map<String, VpnServer> = try {
         if (!file.exists()) emptyMap() else {
@@ -162,8 +137,8 @@ class FavoritesStore(context: Context) {
 
 data class CachedList(val servers: List<VpnServer>, val savedAt: Long)
 
-class ServerRepository(context: Context) {
-    private val cacheFile = File(context.filesDir, "servers_cache.csv")
+class ServerRepository(dir: File) {
+    private val cacheFile = File(dir.apply { mkdirs() }, "servers_cache.csv")
 
     suspend fun loadCache(): CachedList? = withContext(Dispatchers.IO) {
         if (!cacheFile.exists()) return@withContext null

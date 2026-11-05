@@ -320,7 +320,7 @@ private fun ServerRow(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "${server.flag} ${server.hostName}",
+                    withFlags("${server.flag} ${server.hostName}"),
                     style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

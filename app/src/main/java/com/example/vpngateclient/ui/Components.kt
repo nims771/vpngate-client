@@ -34,6 +34,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -155,7 +161,7 @@ fun FlagBox(flag: String, modifier: Modifier = Modifier) {
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
     ) {
-        Box(contentAlignment = Alignment.Center) { Text(flag, fontSize = 28.sp) }
+        Box(contentAlignment = Alignment.Center) { Text(withFlags(flag), fontSize = 28.sp) }
     }
 }
 
@@ -231,4 +237,26 @@ fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifie
             contentColor = MaterialTheme.colorScheme.onError,
         ),
     ) { Text(text) }
+}
+
+/**
+ * Шрифт для флагов-эмодзи. На Android флаги рисует система; в Windows своих флагов нет
+ * (вместо них буквы «TR»), поэтому Windows-версия подставляет сюда шрифт Twemoji.
+ */
+val LocalFlagFont = staticCompositionLocalOf<FontFamily?> { null }
+
+/** Текст, где символы флагов (региональные индикаторы) набраны шрифтом [LocalFlagFont]. */
+@Composable
+fun withFlags(text: String): AnnotatedString {
+    val font = LocalFlagFont.current ?: return AnnotatedString(text)
+    return buildAnnotatedString {
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            val n = Character.charCount(cp)
+            val chunk = text.substring(i, i + n)
+            if (cp in 0x1F1E6..0x1F1FF) withStyle(SpanStyle(fontFamily = font)) { append(chunk) } else append(chunk)
+            i += n
+        }
+    }
 }

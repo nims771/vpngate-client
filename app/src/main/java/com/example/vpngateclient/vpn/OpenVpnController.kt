@@ -14,6 +14,7 @@ import de.blinkt.openvpn.core.LogItem
 import de.blinkt.openvpn.core.OpenVPNService
 import de.blinkt.openvpn.core.ProfileManager
 import de.blinkt.openvpn.core.VPNLaunchHelper
+import com.example.vpngateclient.data.AppSettings
 import com.example.vpngateclient.data.VpnServer
 import kittoku.osc.api.SstpEngine
 import kotlinx.coroutines.CoroutineScope
@@ -33,60 +34,13 @@ import java.util.Date
 import java.util.Locale
 import de.blinkt.openvpn.core.VpnStatus as EngineStatus
 
-/** Текущее состояние туннеля (уровни — из ConnectionStatus движка OpenVPN). */
-data class VpnStatus(
-    val level: String = "LEVEL_NOTCONNECTED",
-    val state: String = "",
-    val message: String = "",
-    val serverId: String? = null,
-    val serverName: String? = null,
-    /** Каким протоколом идёт подключение: "SSTP" или "OpenVPN". */
-    val protocol: String? = null,
-) {
-    val isConnected get() = level == "LEVEL_CONNECTED"
-    val isConnecting get() = level in CONNECTING
-    val isActive get() = isConnected || isConnecting || level == "LEVEL_VPNPAUSED"
-
-    val title: String
-        get() = when (level) {
-            "LEVEL_CONNECTED" -> "Подключено"
-            "LEVEL_VPNPAUSED" -> "На паузе"
-            "LEVEL_NONETWORK" -> "Нет сети"
-            "LEVEL_AUTH_FAILED" -> "Ошибка авторизации"
-            in CONNECTING -> "Подключение…"
-            else -> "Не подключено"
-        }
-
-    private companion object {
-        val CONNECTING = setOf(
-            "LEVEL_START",
-            "LEVEL_CONNECTING_SERVER_REPLIED",
-            "LEVEL_CONNECTING_NO_SERVER_REPLY_YET",
-            "LEVEL_WAITING_FOR_USER_INPUT",
-        )
-    }
-}
-
-enum class Protocol(val label: String) {
-    AUTO("Авто: SSTP, при неудаче OpenVPN"),
-    SSTP("SSTP (похож на HTTPS)"),
-    OPENVPN("OpenVPN"),
-}
-
-sealed interface ConnectResult {
-    data object Started : ConnectResult
-    /** Нужно показать системный запрос на VPN и потом повторить connect(). */
-    data class NeedPermission(val intent: Intent) : ConnectResult
-    data class Error(val message: String) : ConnectResult
-}
-
 /**
  * Управление VPN двумя встроенными движками:
  *  • SSTP — ядро Open SSTP Client (модуль :sstp), трафик выглядит как HTTPS;
  *  • OpenVPN — движок OpenVPN for Android (модуль :openvpn), работает в процессе «:openvpn».
  * В режиме AUTO сначала пробуется SSTP, а если он не подключился — OpenVPN.
  */
-class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineStatus.LogListener {
+class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineStatus.LogListener, VpnBackend {
 
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("vpn", Context.MODE_PRIVATE)
@@ -95,11 +49,11 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
     private val _status = MutableStateFlow(
         VpnStatus(serverId = prefs.getString("serverId", null), serverName = prefs.getString("serverName", null))
     )
-    val status: StateFlow<VpnStatus> = _status.asStateFlow()
+    override val status: StateFlow<VpnStatus> = _status.asStateFlow()
 
     /** Журнал подключения (последние строки) от обоих движков. */
     private val _log = MutableStateFlow<List<String>>(emptyList())
-    val log: StateFlow<List<String>> = _log.asStateFlow()
+    override val log: StateFlow<List<String>> = _log.asStateFlow()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
     /** Какой движок сейчас главный (его статус показываем). */
@@ -154,7 +108,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
         return timeFormat.format(Date(item.logtime)) + "  " + text
     }
 
-    fun clearLog() {
+    override fun clearLog() {
         _log.value = emptyList()
     }
 
@@ -214,6 +168,9 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
 
     // ---------- подключение ----------
 
+    override suspend fun connect(server: VpnServer, settings: AppSettings): ConnectResult =
+        connect(server, settings.protocol, settings.sstpTrustAll, settings.sstpSendSni, settings.sstpMtu)
+
     suspend fun connect(
         server: VpnServer,
         protocol: Protocol,
@@ -237,7 +194,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
                 stopSstp()
                 startOpenVpn(server)
             }
-            Protocol.SSTP, Protocol.AUTO -> {
+            Protocol.SSTP, Protocol.AUTO, Protocol.SOFTETHER -> {
                 if (active == Protocol.OPENVPN) stopOpenVpn()
                 active = null
                 // Предыдущий сеанс SSTP нужно сначала полностью закрыть
@@ -323,7 +280,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
         }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         fallbackAllowed = false
         if (active == null) stopSstp()
         pending = null

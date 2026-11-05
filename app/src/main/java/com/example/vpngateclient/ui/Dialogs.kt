@@ -85,7 +85,7 @@ fun ServerDetailsSheet(
                 .padding(bottom = 28.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(server.flag, fontSize = 40.sp)
+                Text(withFlags(server.flag), fontSize = 40.sp)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(server.countryLong, style = MaterialTheme.typography.titleLarge)

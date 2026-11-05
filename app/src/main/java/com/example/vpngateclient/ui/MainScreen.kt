@@ -50,9 +50,10 @@ private const val TAB_SETTINGS = 2
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(vm: MainViewModel = viewModel()) {
-    val state by vm.state.collectAsStateWithLifecycle()
-    val vpnStatus by vm.vpnStatus.collectAsStateWithLifecycle()
-    val vpnLog by vm.vpnLog.collectAsStateWithLifecycle()
+    val core = vm.core
+    val state by core.state.collectAsStateWithLifecycle()
+    val vpnStatus by core.vpnStatus.collectAsStateWithLifecycle()
+    val vpnLog by core.vpnLog.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -64,7 +65,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { result -> vm.onPermissionResult(result.resultCode == Activity.RESULT_OK) }
+    ) { result -> core.onPermissionResult(result.resultCode == Activity.RESULT_OK) }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/x-openvpn-profile")
@@ -84,12 +85,12 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     }
 
     LaunchedEffect(Unit) {
-        vm.events.collect { event ->
+        core.events.collect { event ->
             when (event) {
                 is UiEvent.Message -> scope.launch { snackbar.showSnackbar(event.text) }
-                is UiEvent.LaunchIntent ->
-                    runCatching { permissionLauncher.launch(event.intent) }
-                        .onFailure { vm.onPermissionResult(false) }
+                is UiEvent.NeedPermission ->
+                    runCatching { permissionLauncher.launch(event.payload as android.content.Intent) }
+                        .onFailure { core.onPermissionResult(false) }
             }
         }
     }
@@ -153,33 +154,34 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                     state = state,
                     status = vpnStatus,
                     lastLog = vpnLog.lastOrNull(),
-                    findServer = vm::findServer,
-                    onToggle = vm::toggleConnection,
+                    findServer = core::findServer,
+                    onToggle = core::toggleConnection,
                     onOpenLocations = { tab = TAB_COUNTRIES },
-                    onRefresh = vm::refresh,
-                    onSpeedTest = vm::runSpeedTest,
-                    onSwitchServer = vm::switchServer,
+                    onRefresh = core::refresh,
+                    onSpeedTest = core::runSpeedTest,
+                    onSwitchServer = core::switchServer,
                 )
 
                 TAB_COUNTRIES -> CountriesScreen(
                     state = state,
                     connectedServerId = vpnStatus.serverId.takeIf { vpnStatus.isConnected },
                     onSelect = { sel ->
-                        vm.select(sel)
+                        core.select(sel)
                         tab = TAB_VPN
                     },
-                    onRefresh = vm::refresh,
-                    onPingAll = vm::pingAll,
-                    onStopPing = vm::stopPing,
-                    onQuery = vm::setQuery,
+                    onRefresh = core::refresh,
+                    onPingAll = core::pingAll,
+                    onStopPing = core::stopPing,
+                    onQuery = core::setQuery,
                     onServerInfo = { detailsId = it.id },
-                    onFavorite = vm::toggleFavorite,
+                    onFavorite = core::toggleFavorite,
                 )
 
                 else -> SettingsScreen(
                     settings = state.settings,
+                    protocols = core.protocols,
                     versionName = versionName,
-                    onChange = vm::updateSettings,
+                    onChange = core::updateSettings,
                     onOpenLog = { showLog = true },
                 )
             }
@@ -187,7 +189,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     }
 
     // Подробности о сервере
-    val details = detailsId?.let { vm.findServer(it) }
+    val details = detailsId?.let { core.findServer(it) }
     if (details != null) {
         val connectedHere = vpnStatus.isActive && vpnStatus.serverId == details.id
         ServerDetailsSheet(
@@ -198,16 +200,16 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
             connectedHere = connectedHere,
             onDismiss = { detailsId = null },
             onConnect = {
-                vm.connectTo(details)
+                core.connectTo(details)
                 detailsId = null
                 tab = TAB_VPN
             },
             onDisconnect = {
-                vm.cancelConnection()
+                core.cancelConnection()
                 detailsId = null
             },
-            onPing = { vm.pingOne(details) },
-            onFavorite = { vm.toggleFavorite(details) },
+            onPing = { core.pingOne(details) },
+            onFavorite = { core.toggleFavorite(details) },
             onExport = {
                 vm.pendingExport = details
                 exportLauncher.launch("vpngate_${details.countryShort.lowercase()}_${details.hostName}.ovpn")
@@ -227,7 +229,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                 clipboard.setText(AnnotatedString(vpnLog.joinToString("\n")))
                 scope.launch { snackbar.showSnackbar("Журнал скопирован") }
             },
-            onClear = vm::clearLog,
+            onClear = core::clearLog,
         )
     }
 }

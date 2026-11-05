@@ -43,6 +43,15 @@ fun SettingsScreen(
     versionName: String,
     onChange: (AppSettings) -> Unit,
     onOpenLog: () -> Unit,
+    protocols: List<Protocol> = listOf(Protocol.AUTO, Protocol.SSTP, Protocol.OPENVPN),
+    /** Настройки SSTP-движка Android (на Windows SSTP встроен в систему). */
+    showSstpTuning: Boolean = true,
+    protocolHint: String = "SSTP выглядит как обычный HTTPS и проходит через большинство блокировок. " +
+        "OpenVPN во многих сетях блокируется.",
+    aboutText: String = "Серверы: VPN Gate (Университет Цукубы), их держат добровольцы; серверы ведут журналы подключений.\n" +
+        "SSTP: Open SSTP Client (MIT). OpenVPN: OpenVPN for Android (GPL v2).\n" +
+        "Приложение распространяется по GPL v2, исходный код открыт.",
+    extraContent: @Composable () -> Unit = {},
 ) {
     Column(
         Modifier
@@ -60,7 +69,7 @@ fun SettingsScreen(
         // ---- Подключение ----
         SectionCard(Modifier.fillMaxWidth()) {
             CardTitle("Протокол")
-            Protocol.entries.forEach { p ->
+            protocols.forEach { p ->
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -72,7 +81,7 @@ fun SettingsScreen(
                     Text(p.label, style = MaterialTheme.typography.bodyLarge)
                 }
             }
-            Hint("SSTP выглядит как обычный HTTPS и проходит через большинство блокировок. OpenVPN во многих сетях блокируется.")
+            Hint(protocolHint)
             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
             SwitchRow(
                 "Подключаться при запуске",
@@ -93,8 +102,10 @@ fun SettingsScreen(
             )
         }
 
+        extraContent()
+
         // ---- SSTP ----
-        SectionCard(Modifier.fillMaxWidth()) {
+        if (showSstpTuning) SectionCard(Modifier.fillMaxWidth()) {
             CardTitle("SSTP")
             SwitchRow(
                 "Отправлять имя сервера (SNI)",
@@ -182,12 +193,7 @@ fun SettingsScreen(
         // ---- О приложении ----
         SectionCard(Modifier.fillMaxWidth()) {
             CardTitle("О приложении")
-            Hint(
-                "VPN Gate Client $versionName\n" +
-                    "Серверы: VPN Gate (Университет Цукубы), их держат добровольцы; серверы ведут журналы подключений.\n" +
-                    "SSTP: Open SSTP Client (MIT). OpenVPN: OpenVPN for Android (GPL v2).\n" +
-                    "Приложение распространяется по GPL v2, исходный код открыт."
-            )
+            Hint("VPN Gate Client $versionName\n$aboutText")
         }
         Spacer(Modifier.height(16.dp))
     }
