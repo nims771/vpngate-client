@@ -351,13 +351,16 @@ private fun ConnectionSteps(status: VpnStatus) {
                 val done = i < status.step
                 val current = i == status.step
                 val failed = current && status.stepFailed
-                val running = current && !failed && status.isActive
+                // подключено, но интернет не подтвердился — не ошибка, просто предупреждение
+                val unsure = current && status.isConnected && status.internetOk == false
+                val running = current && !failed && !unsure && status.isActive
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Surface(
                         shape = CircleShape,
                         color = when {
                             done -> Green
                             failed -> Red
+                            unsure -> Amber
                             running -> Amber.copy(alpha = 0.18f)
                             else -> Idle
                         },
@@ -367,6 +370,7 @@ private fun ConnectionSteps(status: VpnStatus) {
                             when {
                                 done -> Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
                                 failed -> Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                unsure -> Text("?", style = MaterialTheme.typography.labelLarge, color = Color.White)
                                 running -> CircularProgressIndicator(
                                     color = Amber, strokeWidth = 2.5.dp, modifier = Modifier.size(18.dp),
                                 )
@@ -381,7 +385,7 @@ private fun ConnectionSteps(status: VpnStatus) {
                         color = when {
                             done -> Green
                             failed -> Red
-                            running -> Amber
+                            unsure || running -> Amber
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         textAlign = TextAlign.Center,
@@ -393,7 +397,9 @@ private fun ConnectionSteps(status: VpnStatus) {
         val footer = when {
             status.isConnected && status.internetOk == true ->
                 "Интернет через VPN работает" + (status.publicIp?.let { "\nВаш IP: $it" } ?: "")
-            status.isConnected && status.internetOk == false -> "Нет интернета через этот сервер"
+            status.isConnected && status.internetOk == false ->
+                "Интернет через VPN не подтвердился. Если сайты не открываются — «Сменить сервер»"
+            status.isConnected && status.internetOk == null && status.step < status.steps.size -> "Проверяю интернет…"
             status.stepFailed -> status.message
             else -> null
         }
@@ -404,7 +410,8 @@ private fun ConnectionSteps(status: VpnStatus) {
                 style = MaterialTheme.typography.bodySmall,
                 color = when {
                     status.isConnected && status.internetOk == true -> Green
-                    status.isConnected || status.stepFailed -> Red
+                    status.isConnected && status.internetOk == false -> Amber
+                    status.stepFailed -> Red
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 textAlign = TextAlign.Center,

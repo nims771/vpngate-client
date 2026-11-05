@@ -89,7 +89,7 @@ class DesktopScreenshotTest {
             status = VpnStatus(
                 level = "LEVEL_CONNECTED", serverId = "vpn458682530",
                 serverName = "Japan · vpn458682530", protocol = "SoftEther",
-                steps = listOf("Сервер", "IP-адрес", "Интернет"), step = 3,
+                steps = listOf("Сервер", "Сеанс VPN", "Интернет"), step = 3,
                 internetOk = true, publicIp = "219.100.37.12",
             ),
             lastLog = null,
@@ -105,7 +105,7 @@ class DesktopScreenshotTest {
             status = VpnStatus(
                 level = "LEVEL_CONNECTING_SERVER_REPLIED", serverId = "vpn831105538",
                 serverName = "Japan · vpn831105538", protocol = "SoftEther",
-                steps = listOf("Сервер", "IP-адрес", "Интернет"), step = 2,
+                steps = listOf("Сервер", "Сеанс VPN", "Интернет"), step = 2,
             ),
             lastLog = "13:21:04 Проверка интернета…",
             findServer = { id -> servers.firstOrNull { it.id == id } },
@@ -121,7 +121,7 @@ class DesktopScreenshotTest {
                 level = "LEVEL_NOTCONNECTED", serverId = "vpn831105538",
                 serverName = "Japan · vpn831105538", protocol = "SoftEther",
                 message = "Подключились, но интернета через этот сервер нет",
-                steps = listOf("Сервер", "IP-адрес", "Интернет"), step = 2, stepFailed = true,
+                steps = listOf("Сервер", "Сеанс VPN", "Интернет"), step = 2, stepFailed = true,
             ),
             lastLog = null,
             findServer = { id -> servers.firstOrNull { it.id == id } },
