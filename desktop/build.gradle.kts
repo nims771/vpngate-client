@@ -78,8 +78,12 @@ compose.desktop {
             description = "Client for free VPN Gate servers"
             vendor = "VPN Gate Client"
             copyright = "GPL v2"
-            // все модули JDK — надёжнее, чем угадывать (TLS, сеть, AWT)
-            includeAllModules = true
+            // только нужные модули JDK: установщик в ~2 раза меньше, чем со всеми
+            modules(
+                "java.desktop", "java.logging", "java.naming", "java.net.http", "java.prefs",
+                "java.management", "java.instrument", "jdk.crypto.ec", "jdk.crypto.cryptoki",
+                "jdk.charsets", "jdk.localedata", "jdk.unsupported", "jdk.zipfs", "jdk.accessibility",
+            )
 
             windows {
                 menu = true
