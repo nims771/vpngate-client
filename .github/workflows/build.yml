@@ -116,6 +116,8 @@ jobs:
     if: always() && needs.build.result == 'success' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: art
@@ -123,7 +125,6 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
           TAG="build-${{ github.run_number }}"
           FILES="art/VpnGateClient-apk/VpnGateClient.apk"
@@ -135,13 +136,12 @@ jobs:
           (Windows-сборка в этот раз не удалась)"; fi
           gh release create "$TAG" $FILES \
             --title "VPN Gate Client (сборка ${{ github.run_number }})" \
-            --notes "$NOTES" --target "$GITHUB_SHA" --latest
+            --notes "$NOTES" --latest
 
       - name: Publish screenshots
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
         run: |
           shopt -s nullglob
           SHOTS=(art/android-shots/*.png art/windows-shots/*.png)
