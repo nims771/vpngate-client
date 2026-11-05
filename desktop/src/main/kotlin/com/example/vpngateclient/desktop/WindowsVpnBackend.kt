@@ -12,6 +12,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -111,6 +114,7 @@ class WindowsVpnBackend : VpnBackend {
         addLog("=== ${server.countryLong} · ${server.hostName} (${server.ip}), протокол $label ===")
 
         job = scope.launch {
+            refreshBaseline()
             // 1. туннель
             val ok = ops.withLock {
                 runCatching {
@@ -128,26 +132,23 @@ class WindowsVpnBackend : VpnBackend {
 
             // 2. IP-адрес на адаптере VPN
             setStep(1, "Получение IP-адреса…")
-            val ip = waitForVpnIp(proto)
+            val found = waitForVpnIp(proto)
             ensureActive()
-            if (ip === NO_IP) {
-                failStep(1, "Сервер не выдал IP-адрес")
-                teardown(proto)
-                return@launch
-            }
+            val ip = found.takeIf { it !== NO_IP }
 
             // 3. интернет через туннель
             setStep(2, "Проверка интернета…")
             var publicIp: String? = null
-            for (attempt in 1..4) {
-                publicIp = probeInternet(ip)
+            for (attempt in 1..5) {
+                publicIp = probeInternet(ip, verbose = attempt == 1 || attempt == 5)
                 if (publicIp != null) break
                 ensureActive()
                 delay(3_000)
             }
             ensureActive()
             if (publicIp == null) {
-                failStep(2, "Подключились, но интернета через этот сервер нет")
+                if (found === NO_IP) failStep(1, "Сервер не выдал IP-адрес")
+                else failStep(2, "Подключились, но интернета через этот сервер нет")
                 teardown(proto)
                 return@launch
             }
@@ -180,7 +181,7 @@ class WindowsVpnBackend : VpnBackend {
                 return
             }
             if (tick % 4 == 0) { // примерно раз в 16 секунд
-                val ok = probeInternet(ip) != null
+                val ok = probeInternet(ip, verbose = noNet >= 1) != null
                 noNet = if (ok) 0 else noNet + 1
                 if (ok && _status.value.internetOk != true) {
                     addLog("Интернет снова работает")
@@ -280,46 +281,95 @@ class WindowsVpnBackend : VpnBackend {
         }
     }.getOrNull()
 
+    /** Внешний IP без VPN — чтобы понять, что запрос ушёл мимо туннеля. */
+    @Volatile private var baselineIp: String? = null
+    @Volatile private var baselineAt = 0L
+
+    private suspend fun refreshBaseline() {
+        if (System.currentTimeMillis() - baselineAt < 10 * 60_000) return
+        baselineAt = System.currentTimeMillis()
+        baselineIp = withContext(Dispatchers.IO) { runCatching { trace(null, "1.1.1.1", 4_000) }.getOrNull() }
+            ?.takeIf { it.isNotBlank() }
+    }
+
     /**
-     * Проверяет интернет через туннель (запрос с адреса VPN-адаптера).
-     * Возвращает внешний IP ("" — интернет есть, но IP не узнали) или null, если интернета нет.
+     * Есть ли интернет через VPN. Пробуем несколькими способами сразу (с адреса VPN-адаптера и обычным путём),
+     * хватает любого. Возвращает внешний IP ("" — интернет есть, IP не узнали) или null.
      */
-    private fun probeInternet(local: java.net.InetAddress?): String? {
-        for (target in listOf("1.1.1.1", "1.0.0.1")) {
-            val r = runCatching {
-                java.net.Socket().use { s ->
-                    if (local != null) s.bind(java.net.InetSocketAddress(local, 0))
-                    s.connect(java.net.InetSocketAddress(target, 80), 5_000)
-                    s.soTimeout = 5_000
-                    s.getOutputStream().write(
-                        "GET /cdn-cgi/trace HTTP/1.1\r\nHost: $target\r\nUser-Agent: VpnGateClient\r\nConnection: close\r\n\r\n"
-                            .toByteArray()
-                    )
-                    val buf = ByteArray(4096)
-                    val sb = StringBuilder()
-                    while (sb.length < 4096) {
-                        val n = s.getInputStream().read(buf)
-                        if (n <= 0) break
-                        sb.append(String(buf, 0, n, Charsets.ISO_8859_1))
-                        if (sb.contains("\nip=") && sb.indexOf("\n", sb.indexOf("\nip=") + 1) > 0) break
-                    }
-                    val text = sb.toString()
-                    when {
-                        !text.startsWith("HTTP/") -> null
-                        else -> Regex("(?m)^ip=([0-9a-fA-F.:]+)").find(text)?.groupValues?.get(1) ?: ""
-                    }
-                }
-            }.getOrNull()
-            if (r != null) return r
-        }
-        // HTTP мог быть закрыт — хватит и TCP до DNS Google
-        return runCatching {
-            java.net.Socket().use { s ->
-                if (local != null) s.bind(java.net.InetSocketAddress(local, 0))
-                s.connect(java.net.InetSocketAddress("8.8.8.8", 53), 5_000)
-                ""
+    private suspend fun probeInternet(local: java.net.InetAddress?, verbose: Boolean = false): String? = coroutineScope {
+        val bound = local?.let { l -> async(Dispatchers.IO) { runCatching { trace(l, "1.1.1.1", 5_000) } } }
+        val boundDns = local?.let { l -> async(Dispatchers.IO) { runCatching { tcp(l, "8.8.8.8", 53) } } }
+        val plain = async(Dispatchers.IO) { runCatching { trace(null, "1.0.0.1", 5_000) } }
+        val plainDns = async(Dispatchers.IO) { runCatching { tcp(null, "8.8.4.4", 53) } }
+        val ms = async(Dispatchers.IO) { runCatching { msConnectTest() } }
+
+        val rBound = bound?.await()
+        val rBoundDns = boundDns?.await()
+        val rPlain = plain.await()
+        val rPlainDns = plainDns.await()
+        val rMs = ms.await()
+
+        if (verbose) {
+            fun d(r: Result<*>?) = when {
+                r == null -> "—"
+                r.isSuccess -> "ok" + (r.getOrNull() as? String)?.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
+                else -> r.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName }.orEmpty().take(60)
             }
-        }.getOrNull()
+            addLog(
+                "Проверка интернета: VPN-адрес ${local?.hostAddress ?: "?"}; " +
+                    "1.1.1.1 через VPN: ${d(rBound)}; DNS через VPN: ${d(rBoundDns)}; " +
+                    "1.0.0.1: ${d(rPlain)}; DNS: ${d(rPlainDns)}; msft: ${d(rMs)}" +
+                    (baselineIp?.let { "; IP без VPN: $it" } ?: "")
+            )
+        }
+
+        // ответ пришёл с нашим же IP без VPN — значит, запрос ушёл мимо туннеля
+        val plainIp = rPlain.getOrNull()?.takeIf { it != baselineIp || it.isBlank() }
+        when {
+            rBound?.isSuccess == true -> rBound.getOrNull()
+            rBoundDns?.isSuccess == true -> plainIp ?: ""
+            plainIp != null -> plainIp
+            rPlain.isSuccess -> null // ушло мимо VPN
+            rPlainDns.isSuccess || rMs.isSuccess -> ""
+            else -> null
+        }
+    }
+
+    /** GET http://<ip>/cdn-cgi/trace — внешний IP ("" если в ответе его нет). */
+    private fun trace(local: java.net.InetAddress?, target: String, timeout: Int): String =
+        java.net.Socket().use { s ->
+            if (local != null) s.bind(java.net.InetSocketAddress(local, 0))
+            s.connect(java.net.InetSocketAddress(target, 80), timeout)
+            s.soTimeout = timeout
+            s.getOutputStream().write(
+                "GET /cdn-cgi/trace HTTP/1.1\r\nHost: $target\r\nUser-Agent: VpnGateClient\r\nConnection: close\r\n\r\n"
+                    .toByteArray()
+            )
+            val text = String(s.getInputStream().readNBytes(4096), Charsets.ISO_8859_1)
+            if (!text.startsWith("HTTP/")) error("нет HTTP-ответа")
+            Regex("(?m)^ip=([0-9a-fA-F.:]+)").find(text)?.groupValues?.get(1) ?: ""
+        }
+
+    private fun tcp(local: java.net.InetAddress?, host: String, port: Int): String =
+        java.net.Socket().use { s ->
+            if (local != null) s.bind(java.net.InetSocketAddress(local, 0))
+            s.connect(java.net.InetSocketAddress(host, port), 5_000)
+            ""
+        }
+
+    /** Проверка Windows: http://www.msftconnecttest.com/connecttest.txt */
+    private fun msConnectTest(): String {
+        val c = java.net.URL("http://www.msftconnecttest.com/connecttest.txt").openConnection() as java.net.HttpURLConnection
+        c.connectTimeout = 5_000
+        c.readTimeout = 5_000
+        c.useCaches = false
+        try {
+            val body = c.inputStream.use { String(it.readNBytes(200)) }
+            if (!body.contains("Microsoft Connect Test")) error("ответ подменён")
+            return ""
+        } finally {
+            c.disconnect()
+        }
     }
 
     override fun connectTimeoutMs(protocol: Protocol): Long = 130_000
