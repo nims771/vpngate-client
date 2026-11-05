@@ -84,7 +84,19 @@ jobs:
         run: ./gradlew :desktop:test
 
       - name: Build MSI and portable app
-        run: ./gradlew :desktop:packageMsi :desktop:createDistributable
+        run: ./gradlew :desktop:packageReleaseMsi :desktop:createReleaseDistributable
+
+      # запускаем собранную программу: она должна открыть окно и сама выйти с кодом 0
+      - name: Smoke test
+        shell: pwsh
+        env:
+          VPNGATE_SMOKE_TEST: "1"
+        run: |
+          $exe = "desktop/build/compose/binaries/main-release/app/VPN Gate Client/VPN Gate Client.exe"
+          $p = Start-Process -FilePath $exe -PassThru
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "app did not exit in 60 s" }
+          if ($p.ExitCode -ne 0) { throw "app exit code $($p.ExitCode)" }
+          "smoke test OK"
 
       - name: Show packaging logs
         if: failure()
@@ -93,8 +105,8 @@ jobs:
       - name: Collect files
         run: |
           mkdir -p dist
-          cp desktop/build/compose/binaries/main/msi/*.msi "dist/VpnGateClient-Windows.msi"
-          cd desktop/build/compose/binaries/main/app
+          cp desktop/build/compose/binaries/main-release/msi/*.msi "dist/VpnGateClient-Windows.msi"
+          cd desktop/build/compose/binaries/main-release/app
           7z a -tzip "$GITHUB_WORKSPACE/dist/VpnGateClient-Windows-portable.zip" "VPN Gate Client" > /dev/null
           ls -la "$GITHUB_WORKSPACE/dist"
 

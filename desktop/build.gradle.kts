@@ -71,6 +71,14 @@ compose.desktop {
         mainClass = "com.example.vpngateclient.desktop.MainKt"
         jvmArgs += listOf("-Dfile.encoding=UTF-8", "-Dsun.stdout.encoding=UTF-8")
 
+        // ProGuard выкидывает неиспользуемый код (в основном тысячи иконок Material) — установщик меньше
+        buildTypes.release.proguard {
+            version.set("7.6.1")
+            obfuscate.set(false)
+            optimize.set(false)
+            configurationFiles.from(project.file("proguard-rules.pro"))
+        }
+
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "VPN Gate Client"

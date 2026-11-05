@@ -114,6 +114,13 @@ fun main() {
             state = rememberWindowState(size = DpSize(440.dp, 860.dp), position = WindowPosition.PlatformDefault),
         ) {
             window.minimumSize = java.awt.Dimension(380, 600)
+            // проверка сборки в CI: окно отрисовалось — выходим с кодом 0
+            if (System.getenv("VPNGATE_SMOKE_TEST") != null) {
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(5_000)
+                    exitProcess(0)
+                }
+            }
             CompositionLocalProvider(LocalFlagFont provides flagFont) {
                 AppTheme {
                     DesktopApp(core = core, backend = backend, versionName = APP_VERSION)
