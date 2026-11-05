@@ -167,9 +167,12 @@ class AppCore(
     private var permissionWait: CompletableDeferred<Boolean>? = null
 
     init {
-        // Таймер подключения
+        // Таймер подключения и автопереподключение при обрыве
         scope.launch {
+            var wasConnected = false
             vpn.status.collect { st ->
+                if (st.dropped && wasConnected && connectJob?.isActive != true) onDropped(st)
+                wasConnected = st.isConnected
                 _state.update {
                     when {
                         st.isConnected && it.connectedSince == 0L -> it.copy(connectedSince = System.currentTimeMillis())
@@ -396,6 +399,27 @@ class AppCore(
         }
     }
 
+    private val drops = ArrayDeque<Long>()
+
+    /** Сервер оборвал соединение или через него нет интернета — переходим на другой. */
+    private fun onDropped(st: VpnStatus) {
+        val now = System.currentTimeMillis()
+        while (drops.isNotEmpty() && now - drops.first() > 10 * 60_000) drops.removeFirst()
+        st.serverId?.let { id -> _state.update { it.copy(pings = it.pings + (id to -1L)) } }
+        if (drops.size >= 3) {
+            scope.launch { msg("Соединение обрывается слишком часто. Обновите список или выберите другую страну.") }
+            return
+        }
+        drops.addLast(now)
+        scope.launch { msg((st.message.ifBlank { "Соединение оборвалось" }) + " — подключаюсь к другому серверу") }
+        // конкретный сервер оборвался — ищем замену в той же стране
+        val sel = _state.value.selection
+        if (sel is Selection.Server) {
+            findServer(sel.id)?.let { _state.update { s -> s.copy(selection = Selection.Country(it.countryShort)) } }
+        }
+        connectSelected()
+    }
+
     private enum class Attempt { CONNECTED, FAILED, CANCELLED }
 
     private suspend fun tryConnect(server: VpnServer): Attempt {
@@ -422,7 +446,7 @@ class AppCore(
             return Attempt.FAILED
         }
 
-        val timeout = when (settings.protocol) {
+        val timeout = vpn.connectTimeoutMs(settings.protocol) ?: when (settings.protocol) {
             Protocol.SSTP -> 40_000L
             Protocol.OPENVPN -> 70_000L
             Protocol.AUTO -> 110_000L

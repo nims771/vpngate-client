@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,17 +69,18 @@ class WindowsVpnBackend : VpnBackend {
         _log.value = emptyList()
     }
 
-    private fun setStatus(level: String, message: String = "", server: VpnServer? = null, proto: String? = null) {
-        _status.update {
-            VpnStatus(
-                level = level,
-                state = level.removePrefix("LEVEL_"),
-                message = message,
-                serverId = server?.id ?: it.serverId,
-                serverName = server?.let { s -> "${s.countryLong} · ${s.hostName}" } ?: it.serverName,
-                protocol = proto ?: it.protocol,
-            )
-        }
+    // ------------------------------------------------------------------ статус
+
+    private fun lvl(st: VpnStatus, level: String, message: String) =
+        st.copy(level = level, state = level.removePrefix("LEVEL_"), message = message)
+
+    private fun setStep(i: Int, message: String) = _status.update {
+        lvl(it, if (i == 0) "LEVEL_START" else "LEVEL_CONNECTING_SERVER_REPLIED", message).copy(step = i)
+    }
+
+    private fun failStep(i: Int, message: String) {
+        addLog(message)
+        _status.update { lvl(it, "LEVEL_NOTCONNECTED", message).copy(step = i, stepFailed = true) }
     }
 
     // ------------------------------------------------------------------ connect
@@ -97,40 +99,120 @@ class WindowsVpnBackend : VpnBackend {
         active = proto
         val label = if (proto == Protocol.SOFTETHER) "SoftEther" else "SSTP"
         // статус «подключение» ставим сразу: AppCore ждёт либо успеха, либо ошибки
-        setStatus("LEVEL_START", "Подключение к ${server.hostName}…", server, label)
+        _status.value = lvl(
+            VpnStatus(
+                serverId = server.id,
+                serverName = "${server.countryLong} · ${server.hostName}",
+                protocol = label,
+                steps = STEPS,
+            ),
+            "LEVEL_START", "Подключение к ${server.hostName}…",
+        )
         addLog("=== ${server.countryLong} · ${server.hostName} (${server.ip}), протокол $label ===")
 
         job = scope.launch {
-            ops.withLock {
-                val ok = runCatching {
+            // 1. туннель
+            val ok = ops.withLock {
+                runCatching {
                     if (proto == Protocol.SOFTETHER) connectSoftEther(server) else connectSstp(server)
                 }.onFailure { e ->
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     addLog("Ошибка: ${e.message ?: e.javaClass.simpleName}")
                 }.getOrDefault(false)
-                ensureActive()
-                if (!ok) {
-                    setStatus("LEVEL_NOTCONNECTED", "Не удалось подключиться")
-                    return@launch
-                }
             }
             ensureActive()
-            setStatus("LEVEL_CONNECTED", "Подключено", proto = label)
-            addLog("Подключено ✔")
-            // следим, не оборвалось ли соединение
-            while (isActive) {
-                delay(4_000)
-                val alive = runCatching {
-                    if (proto == Protocol.SOFTETHER) softEtherEstablished() == true else sstpConnected()
-                }.getOrDefault(true)
-                if (!alive) {
-                    addLog("Соединение разорвано")
-                    setStatus("LEVEL_NOTCONNECTED", "Соединение разорвано")
-                    break
+            if (!ok) {
+                failStep(0, "Сервер не принял подключение")
+                return@launch
+            }
+
+            // 2. IP-адрес на адаптере VPN
+            setStep(1, "Получение IP-адреса…")
+            val ip = waitForVpnIp(proto)
+            ensureActive()
+            if (ip === NO_IP) {
+                failStep(1, "Сервер не выдал IP-адрес")
+                teardown(proto)
+                return@launch
+            }
+
+            // 3. интернет через туннель
+            setStep(2, "Проверка интернета…")
+            var publicIp: String? = null
+            for (attempt in 1..4) {
+                publicIp = probeInternet(ip)
+                if (publicIp != null) break
+                ensureActive()
+                delay(3_000)
+            }
+            ensureActive()
+            if (publicIp == null) {
+                failStep(2, "Подключились, но интернета через этот сервер нет")
+                teardown(proto)
+                return@launch
+            }
+
+            _status.update {
+                lvl(it, "LEVEL_CONNECTED", "Подключено").copy(
+                    step = STEPS.size, internetOk = true, publicIp = publicIp.ifBlank { null },
+                )
+            }
+            addLog("Подключено ✔ интернет работает" + (publicIp.takeIf { it.isNotBlank() }?.let { ", ваш IP: $it" } ?: ""))
+            monitor(proto, ip)
+        }
+        return ConnectResult.Started
+    }
+
+    /** Следим за соединением: сеанс жив и интернет есть. Иначе — обрыв, AppCore перейдёт на другой сервер. */
+    private suspend fun monitor(proto: Protocol, ip: java.net.InetAddress?) {
+        var deadChecks = 0
+        var noNet = 0
+        var tick = 0
+        while (currentCoroutineContext().isActive) {
+            delay(4_000)
+            tick++
+            val alive = runCatching {
+                if (proto == Protocol.SOFTETHER) softEtherEstablished() != false else sstpConnected()
+            }.getOrDefault(true)
+            deadChecks = if (alive) 0 else deadChecks + 1
+            if (deadChecks >= 2) {
+                drop(proto, "Сервер разорвал соединение")
+                return
+            }
+            if (tick % 4 == 0) { // примерно раз в 16 секунд
+                val ok = probeInternet(ip) != null
+                noNet = if (ok) 0 else noNet + 1
+                if (ok && _status.value.internetOk != true) {
+                    addLog("Интернет снова работает")
+                    _status.update { it.copy(internetOk = true) }
+                }
+                if (noNet == 2) {
+                    addLog("Нет интернета через VPN…")
+                    _status.update { it.copy(internetOk = false) }
+                }
+                if (noNet >= 3) {
+                    drop(proto, "Пропал интернет через этот сервер")
+                    return
                 }
             }
         }
-        return ConnectResult.Started
+    }
+
+    private suspend fun drop(proto: Protocol, message: String) {
+        addLog(message)
+        active = null
+        _status.update { lvl(it, "LEVEL_NOTCONNECTED", message).copy(dropped = true, steps = emptyList()) }
+        teardown(proto)
+    }
+
+    private suspend fun teardown(proto: Protocol) {
+        if (active == proto) active = null
+        ops.withLock {
+            runCatching {
+                if (proto == Protocol.SOFTETHER) vpncmd("AccountDisconnect", ACCOUNT)
+                else run(listOf("rasdial", RAS_NAME, "/disconnect"), 20)
+            }
+        }
     }
 
     override fun disconnect() {
@@ -139,16 +221,12 @@ class WindowsVpnBackend : VpnBackend {
         job?.cancel()
         job = null
         active = null
-        setStatus("LEVEL_NOTCONNECTED", "Отключено")
-        if (wasActive) addLog("Отключение…")
-        cleanup = scope.launch {
-            ops.withLock {
-                runCatching {
-                    if (proto == Protocol.SOFTETHER) vpncmd("AccountDisconnect", ACCOUNT)
-                    else run(listOf("rasdial", RAS_NAME, "/disconnect"), 20)
-                }
-            }
+        // после ошибки статус не трогаем — на экране остаётся, на каком этапе не получилось
+        if (wasActive) _status.update {
+            VpnStatus(serverId = it.serverId, serverName = it.serverName, protocol = it.protocol, message = "Отключено")
         }
+        if (wasActive) addLog("Отключение…")
+        cleanup = scope.launch { teardown(proto) }
     }
 
     /** Синхронное отключение при выходе из программы. */
@@ -156,6 +234,95 @@ class WindowsVpnBackend : VpnBackend {
         disconnect()
         runBlocking { withTimeoutOrNull(8_000) { cleanup?.join() } }
     }
+
+    // ------------------------------------------------------------------ IP и интернет
+
+    @Volatile private var currentNic = "VPN"
+
+    /**
+     * Ждёт IPv4-адрес на адаптере VPN. null — адаптер не нашёлся (проверяем интернет без привязки),
+     * [NO_IP] — адаптер есть, но сервер не выдал адрес.
+     */
+    private suspend fun waitForVpnIp(proto: Protocol): java.net.InetAddress? {
+        val start = System.currentTimeMillis()
+        var seenAdapter = false
+        val limit = if (proto == Protocol.SOFTETHER) 25_000 else 8_000
+        while (System.currentTimeMillis() - start < limit) {
+            val nif = findVpnInterface(proto)
+            if (nif != null) {
+                seenAdapter = true
+                val addr = nif.inetAddresses.toList()
+                    .filterIsInstance<java.net.Inet4Address>()
+                    .firstOrNull { !it.isLinkLocalAddress && !it.isLoopbackAddress }
+                if (addr != null) {
+                    addLog("IP-адрес VPN: ${addr.hostAddress}")
+                    return addr
+                }
+            } else if (System.currentTimeMillis() - start > 6_000 && !seenAdapter) {
+                addLog("Адаптер VPN не найден по имени — проверяю интернет без привязки")
+                return null
+            }
+            delay(1_000)
+        }
+        if (!seenAdapter) return null
+        addLog("Адаптер VPN не получил адрес по DHCP за ${limit / 1000} с")
+        return NO_IP
+    }
+
+    private fun findVpnInterface(proto: Protocol): java.net.NetworkInterface? = runCatching {
+        java.net.NetworkInterface.getNetworkInterfaces().toList().firstOrNull { nif ->
+            val d = nif.displayName.orEmpty()
+            if (proto == Protocol.SOFTETHER) {
+                d.contains("VPN Client Adapter", true) && d.trim().endsWith("- $currentNic", true)
+            } else {
+                d.equals(RAS_NAME, true) || (nif.isUp && nif.isPointToPoint && nif.name.startsWith("ppp"))
+            }
+        }
+    }.getOrNull()
+
+    /**
+     * Проверяет интернет через туннель (запрос с адреса VPN-адаптера).
+     * Возвращает внешний IP ("" — интернет есть, но IP не узнали) или null, если интернета нет.
+     */
+    private fun probeInternet(local: java.net.InetAddress?): String? {
+        for (target in listOf("1.1.1.1", "1.0.0.1")) {
+            val r = runCatching {
+                java.net.Socket().use { s ->
+                    if (local != null) s.bind(java.net.InetSocketAddress(local, 0))
+                    s.connect(java.net.InetSocketAddress(target, 80), 5_000)
+                    s.soTimeout = 5_000
+                    s.getOutputStream().write(
+                        "GET /cdn-cgi/trace HTTP/1.1\r\nHost: $target\r\nUser-Agent: VpnGateClient\r\nConnection: close\r\n\r\n"
+                            .toByteArray()
+                    )
+                    val buf = ByteArray(4096)
+                    val sb = StringBuilder()
+                    while (sb.length < 4096) {
+                        val n = s.getInputStream().read(buf)
+                        if (n <= 0) break
+                        sb.append(String(buf, 0, n, Charsets.ISO_8859_1))
+                        if (sb.contains("\nip=") && sb.indexOf("\n", sb.indexOf("\nip=") + 1) > 0) break
+                    }
+                    val text = sb.toString()
+                    when {
+                        !text.startsWith("HTTP/") -> null
+                        else -> Regex("(?m)^ip=([0-9a-fA-F.:]+)").find(text)?.groupValues?.get(1) ?: ""
+                    }
+                }
+            }.getOrNull()
+            if (r != null) return r
+        }
+        // HTTP мог быть закрыт — хватит и TCP до DNS Google
+        return runCatching {
+            java.net.Socket().use { s ->
+                if (local != null) s.bind(java.net.InetSocketAddress(local, 0))
+                s.connect(java.net.InetSocketAddress("8.8.8.8", 53), 5_000)
+                ""
+            }
+        }.getOrNull()
+    }
+
+    override fun connectTimeoutMs(protocol: Protocol): Long = 130_000
 
     // ------------------------------------------------------------------ SoftEther
 
@@ -181,6 +348,7 @@ class WindowsVpnBackend : VpnBackend {
         }
         // SoftEther показывает адаптер как «VPN Client Adapter - VPN», а принимает имя «VPN»
         nic = nic.substringAfterLast(" - ").trim().ifEmpty { "VPN" }
+        currentNic = nic
 
         // 2. учётная запись подключения
         vpncmd("AccountDisconnect", ACCOUNT)
@@ -211,8 +379,7 @@ class WindowsVpnBackend : VpnBackend {
             }
             when (establishedFrom(st, rows)) {
                 true -> {
-                    addLog("Сеанс установлен. Windows получает адрес по DHCP…")
-                    delay(2_500)
+                    addLog("Сеанс VPN установлен")
                     return true
                 }
                 false -> if (System.currentTimeMillis() - start > 6_000) {
@@ -418,6 +585,9 @@ class WindowsVpnBackend : VpnBackend {
     companion object {
         const val ACCOUNT = "VPNGateClient"
         const val RAS_NAME = "VPN Gate Client (SSTP)"
+        private val STEPS = listOf("Сервер", "IP-адрес", "Интернет")
+        /** Маркер «адаптер есть, а адреса нет». */
+        private val NO_IP: java.net.InetAddress = java.net.InetAddress.getByAddress(byteArrayOf(0, 0, 0, 0))
         private const val MAX_LOG = 400
         private val ESTABLISHED = listOf("established", "установлен", "確立", "已建立", "연결 완료")
 

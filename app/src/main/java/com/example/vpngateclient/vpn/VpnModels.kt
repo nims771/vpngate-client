@@ -13,6 +13,18 @@ data class VpnStatus(
     val serverName: String? = null,
     /** Каким протоколом идёт подключение: "SSTP" или "OpenVPN". */
     val protocol: String? = null,
+    /** Этапы подключения для наглядного индикатора (пусто — индикатор не показывается). */
+    val steps: List<String> = emptyList(),
+    /** Текущий этап (индекс в [steps]); steps.size — все этапы пройдены. */
+    val step: Int = 0,
+    /** Этап [step] завершился ошибкой. */
+    val stepFailed: Boolean = false,
+    /** Работает ли интернет через туннель (null — не проверялось). */
+    val internetOk: Boolean? = null,
+    /** Внешний IP-адрес через VPN, если удалось узнать. */
+    val publicIp: String? = null,
+    /** Соединение оборвалось само (не по кнопке) — можно переподключиться к другому серверу. */
+    val dropped: Boolean = false,
 ) {
     val isConnected get() = level == "LEVEL_CONNECTED"
     val isConnecting get() = level in CONNECTING
@@ -61,4 +73,6 @@ interface VpnBackend {
     suspend fun connect(server: VpnServer, settings: AppSettings): ConnectResult
     fun disconnect()
     fun clearLog()
+    /** Сколько ждать подключения (null — значения по умолчанию для протокола). */
+    fun connectTimeoutMs(protocol: Protocol): Long? = null
 }

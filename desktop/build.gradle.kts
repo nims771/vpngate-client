@@ -11,7 +11,7 @@ plugins {
     id("org.jetbrains.compose")
 }
 
-val appVersion = "3.4.1"
+val appVersion = "3.5.0"
 val shared = rootProject.file("app/src/main/java")
 
 kotlin {

@@ -1,6 +1,12 @@
 package com.example.vpngateclient.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -45,6 +51,7 @@ import com.example.vpngateclient.data.VpnServer
 import com.example.vpngateclient.data.countryFlag
 import com.example.vpngateclient.ui.theme.Amber
 import com.example.vpngateclient.ui.theme.Green
+import com.example.vpngateclient.ui.theme.Idle
 import com.example.vpngateclient.vpn.VpnStatus
 import kotlinx.coroutines.delay
 
@@ -118,6 +125,7 @@ fun HomeScreen(
                 val ping = status.serverId?.let { state.pings[it] }?.takeIf { it > 0 }
                 listOfNotNull(status.protocol, ping?.let { "пинг $it мс" }).joinToString(" · ")
             }
+            status.stepFailed && status.message.isNotBlank() -> status.message
             status.level == "LEVEL_AUTH_FAILED" -> "Сервер отклонил подключение — выберите другой"
             else -> "Нажмите кнопку, чтобы подключиться"
         }
@@ -129,6 +137,12 @@ fun HomeScreen(
             maxLines = 3,
             overflow = TextOverflow.Ellipsis,
         )
+
+        // Наглядные этапы подключения (Windows): сервер → сеанс → IP → интернет
+        if (status.steps.isNotEmpty() && (powerState != PowerState.IDLE || status.stepFailed)) {
+            Spacer(Modifier.height(14.dp))
+            ConnectionSteps(status)
+        }
 
         Spacer(Modifier.height(24.dp))
         LocationCard(state, findServer, onOpenLocations)
@@ -323,5 +337,79 @@ private fun ConnectionTimer(since: Long) {
             fontSize = 20.sp,
             color = Green,
         )
+    }
+}
+
+private val Red = Color(0xFFEF4444)
+
+/** Строка этапов подключения: ✓ пройден, ◌ идёт сейчас, ✕ ошибка, • впереди. */
+@Composable
+private fun ConnectionSteps(status: VpnStatus) {
+    SectionCard(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            status.steps.forEachIndexed { i, label ->
+                val done = i < status.step
+                val current = i == status.step
+                val failed = current && status.stepFailed
+                val running = current && !failed && status.isActive
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(
+                        shape = CircleShape,
+                        color = when {
+                            done -> Green
+                            failed -> Red
+                            running -> Amber.copy(alpha = 0.18f)
+                            else -> Idle
+                        },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            when {
+                                done -> Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                failed -> Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                running -> CircularProgressIndicator(
+                                    color = Amber, strokeWidth = 2.5.dp, modifier = Modifier.size(18.dp),
+                                )
+                                else -> Text("${i + 1}", style = MaterialTheme.typography.labelMedium, color = Color.White)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = when {
+                            done -> Green
+                            failed -> Red
+                            running -> Amber
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                    )
+                }
+            }
+        }
+        val footer = when {
+            status.isConnected && status.internetOk == true ->
+                "Интернет через VPN работает" + (status.publicIp?.let { "\nВаш IP: $it" } ?: "")
+            status.isConnected && status.internetOk == false -> "Нет интернета через этот сервер"
+            status.stepFailed -> status.message
+            else -> null
+        }
+        if (!footer.isNullOrBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                footer,
+                style = MaterialTheme.typography.bodySmall,
+                color = when {
+                    status.isConnected && status.internetOk == true -> Green
+                    status.isConnected || status.stepFailed -> Red
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
