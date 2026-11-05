@@ -184,18 +184,11 @@ class WindowsVpnBackend : VpnBackend {
 
         // 2. учётная запись подключения
         vpncmd("AccountDisconnect", ACCOUNT)
-        vpncmd("AccountDelete", ACCOUNT)
-        val create = vpncmd(
-            "AccountCreate", ACCOUNT,
-            "/SERVER:${server.ip}:$port", "/HUB:VPNGATE", "/USERNAME:vpn", "/NICNAME:$nic",
-        )
-        if (create.code != 0) {
-            addLog(create.text)
-            return false
-        }
-        vpncmd("AccountAnonymousSet", ACCOUNT)
-        vpncmd("AccountRetrySet", ACCOUNT, "/NUM:0", "/INTERVAL:5")
-        vpncmd("AccountServerCertDisable", ACCOUNT)
+        if (!createAccount(server.ip, port, nic)) return false
+        // окна SoftEther «Connecting to…», ошибки и «IP-адрес получен» не показываем —
+        // всё видно в самом приложении и в журнале
+        vpncmd("AccountStatusHide", ACCOUNT)
+        hideSoftEtherWindows(server.ip, port, nic)
 
         // 3. подключение
         addLog("Подключение к ${server.ip}:$port (SoftEther, адаптер $nic)…")
@@ -233,6 +226,57 @@ class WindowsVpnBackend : VpnBackend {
         addLog("Нет ответа за 40 с")
         vpncmd("AccountDisconnect", ACCOUNT)
         return false
+    }
+
+    private fun createAccount(ip: String, port: Int, nic: String): Boolean {
+        vpncmd("AccountDelete", ACCOUNT)
+        val create = vpncmd(
+            "AccountCreate", ACCOUNT,
+            "/SERVER:$ip:$port", "/HUB:VPNGATE", "/USERNAME:vpn", "/NICNAME:$nic",
+        )
+        if (create.code != 0) {
+            addLog(create.text)
+            return false
+        }
+        vpncmd("AccountAnonymousSet", ACCOUNT)
+        vpncmd("AccountRetrySet", ACCOUNT, "/NUM:0", "/INTERVAL:5")
+        vpncmd("AccountServerCertDisable", ACCOUNT)
+        return true
+    }
+
+    /**
+     * Скрывает все всплывающие окна SoftEther для нашего подключения.
+     * В vpncmd есть команда только для окна состояния, поэтому выгружаем настройку в файл,
+     * включаем HideStatusWindow и HideNicInfoWindow и загружаем обратно.
+     */
+    private fun hideSoftEtherWindows(ip: String, port: Int, nic: String) {
+        val dir = listOfNotNull(System.getenv("ProgramData"), System.getProperty("java.io.tmpdir"))
+            .map { File(it, "VpnGateClient") }
+            .firstOrNull { it.mkdirs() || it.isDirectory } ?: return
+        val file = File(dir, "account.vpn")
+        try {
+            file.delete()
+            val exp = vpncmd("AccountExport", ACCOUNT, "/SAVEPATH:${file.absolutePath}")
+            if (exp.code != 0 || !file.isFile) return
+            val bytes = file.readBytes()
+            val bom = bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
+            val text = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
+            val changed = text
+                .replace(Regex("(bool\\s+HideStatusWindow\\s+)false"), "$1true")
+                .replace(Regex("(bool\\s+HideNicInfoWindow\\s+)false"), "$1true")
+            if (changed == text) return
+            file.writeBytes((if (bom) "\uFEFF" else "").toByteArray() + changed.toByteArray(Charsets.UTF_8))
+            vpncmd("AccountDelete", ACCOUNT)
+            val imp = vpncmd("AccountImport", file.absolutePath)
+            if (imp.code != 0) {
+                // не получилось — возвращаем обычную настройку, окно SoftEther просто будет видно
+                addLog("SoftEther: не удалось скрыть окна (${imp.text.lines().lastOrNull { it.isNotBlank() }.orEmpty()})")
+                createAccount(ip, port, nic)
+                vpncmd("AccountStatusHide", ACCOUNT)
+            }
+        } finally {
+            file.delete()
+        }
     }
 
     /** true — установлен, false — не подключено (ошибка), null — ещё подключается. */
