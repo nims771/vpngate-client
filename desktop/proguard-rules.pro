@@ -11,3 +11,9 @@
 -dontwarn org.jetbrains.annotations.**
 -dontwarn javax.annotation.**
 -dontnote **
+# Необязательные зависимости библиотек (сериализация не используется)
+-dontwarn kotlinx.datetime.**
+-dontwarn kotlinx.serialization.**
+-dontwarn org.slf4j.**
+-dontwarn org.jetbrains.skiko.**
+-ignorewarnings
