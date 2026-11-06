@@ -1,6 +1,8 @@
 package com.example.vpngateclient.desktop
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -126,6 +128,28 @@ class DesktopScreenshotTest {
             lastLog = null,
             findServer = { id -> servers.firstOrNull { it.id == id } },
             onToggle = {}, onOpenLocations = {}, onRefresh = {},
+        )
+    }
+
+    @Test
+    fun updates() = shot("6_updates") {
+        val info = com.example.vpngateclient.data.UpdateInfo(
+            "4.0.1", "Новое название — ProXvpn. Обновления теперь приходят прямо в приложение.", "", 61_000_000, "github.com",
+        )
+        androidx.compose.foundation.layout.Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+        ) {
+            com.example.vpngateclient.ui.UpdateCard(
+                com.example.vpngateclient.data.UpdateState.Available(info, prompt = false), "4.0.0", {}, {},
+            )
+            com.example.vpngateclient.ui.UpdateCard(
+                com.example.vpngateclient.data.UpdateState.Downloading(info, 0.42f), "4.0.0", {}, {},
+            )
+            com.example.vpngateclient.ui.UpdateCard(com.example.vpngateclient.data.UpdateState.UpToDate, "4.0.0", {}, {})
+        }
+        com.example.vpngateclient.ui.UpdateDialog(
+            com.example.vpngateclient.data.UpdateState.Available(info, prompt = true), {}, {},
         )
     }
 

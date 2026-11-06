@@ -180,7 +180,7 @@ jobs:
           WV=$(grep -oP 'val appVersion = "\K[^"]+' desktop/build.gradle.kts)
           APK=art/apk/ProXvpn.apk
           MSI=art/windows/ProXvpn-Windows.msi
-          NOTES=$(git log -1 --pretty=%s)
+          NOTES=$(cat release-notes.txt 2>/dev/null || true)
           python3 - "$VC" "$VN" "$WV" "$NOTES" <<'PY'
           import json, os, sys
           vc, vn, wv, notes = sys.argv[1:5]
