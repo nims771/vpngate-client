@@ -707,6 +707,18 @@ update_mirror() {
     local nconf
     nconf="$(nginx_conf_path)"
     mkdir -p "$DATA_DIR/proxvpn"
+    # сжатие списка (в 3–4 раза меньше — важно в медленной сети)
+    if [ -f "$nconf" ] && ! grep -q "gzip_types text/plain" "$nconf"; then
+        cp "$nconf" "$nconf.bak"
+        sed -i "s#^\(\s*\)alias $DATA_DIR/servers.csv;#&\n\1gzip on;\n\1gzip_comp_level 6;\n\1gzip_types text/plain;#" "$nconf"
+        if nginx -t >/dev/null 2>&1; then
+            systemctl reload nginx
+            ok "nginx: включено сжатие списка"
+        else
+            mv "$nconf.bak" "$nconf"
+            warn "nginx не принял сжатие — оставил прежние настройки"
+        fi
+    fi
     if [ -f "$nconf" ] && ! grep -q "/$SECRET/proxvpn/" "$nconf"; then
         cp "$nconf" "$nconf.bak"
         sed -i "s#^    location = /$SECRET/servers.csv {#    location /$SECRET/proxvpn/ {\n        alias $DATA_DIR/proxvpn/;\n        add_header Cache-Control \"no-cache\";\n    }\n&#" "$nconf"
@@ -890,6 +902,9 @@ LOCATION_BLOCK="    location /$SECRET/proxvpn/ {
     location = /$SECRET/servers.csv {
         alias $DATA_DIR/servers.csv;
         default_type text/plain;
+        gzip on;
+        gzip_comp_level 6;
+        gzip_types text/plain;
         add_header Cache-Control \"public, max-age=120\";
     }"
 

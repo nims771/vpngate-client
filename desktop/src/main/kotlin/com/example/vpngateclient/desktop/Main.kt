@@ -32,7 +32,7 @@ import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import kotlin.system.exitProcess
 
-val APP_VERSION: String = System.getProperty("jpackage.app-version") ?: "4.0.0"
+val APP_VERSION: String = System.getProperty("jpackage.app-version") ?: "4.0.1"
 
 /** Шрифт Twemoji с флагами стран (в Windows своих флагов-эмодзи нет). */
 fun loadFlagFont(): FontFamily? = runCatching {

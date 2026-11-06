@@ -158,14 +158,19 @@ class ServerRepository(dir: File) {
 
     private class Attempt(val url: String) {
         val conn = arrayOfNulls<HttpURLConnection>(1)
+        /** Когда последний раз пришли данные — пока данные идут, ждём (медленная сеть). */
+        @Volatile var lastProgress = System.currentTimeMillis()
+        @Volatile var bytes = 0L
         lateinit var result: Deferred<Result<Pair<String, List<VpnServer>>>>
     }
 
     /**
      * Загружает список сразу со всех адресов параллельно и берёт ответ
-     * по приоритету (первый адрес — главный). Общий срок — [timeoutMs].
+     * по приоритету (первый адрес — главный).
+     * Сдаёмся, если [stallMs] ни один адрес не прислал ни байта (или прошло [maxMs] всего):
+     * в медленной сети список качается долго, но идёт — такую загрузку не обрываем.
      */
-    suspend fun download(urls: List<String>, timeoutMs: Long = 25_000): Downloaded {
+    suspend fun download(urls: List<String>, stallMs: Long = 25_000, maxMs: Long = 150_000): Downloaded {
         val list = urls.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
         if (list.isEmpty()) throw IOException("адрес списка не задан")
 
@@ -173,7 +178,7 @@ class ServerRepository(dir: File) {
             Attempt(url).also { a ->
                 a.result = ioScope.async {
                     runCatching {
-                        val text = httpGet(url, a.conn)
+                        val text = httpGet(url, a)
                         val servers = VpnGateParser.parse(text)
                         if (servers.isEmpty()) throw IOException("список пуст или формат не распознан")
                         text to servers
@@ -183,7 +188,7 @@ class ServerRepository(dir: File) {
         }
 
         val winner = try {
-            withTimeoutOrNull(timeoutMs) { awaitWinner(attempts) }
+            withTimeoutOrNull(maxMs) { awaitWinner(attempts, stallMs) }
         } finally {
             // всё, что ещё висит, бросаем и закрываем — не дожидаясь
             attempts.filter { !it.result.isCompleted }.forEach {
@@ -205,16 +210,19 @@ class ServerRepository(dir: File) {
         val reasons = attempts.map { a ->
             val r = if (a.result.isCompleted && !a.result.isCancelled) a.result.await() else null
             val why = r?.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName }
-                ?: "нет ответа за ${timeoutMs / 1000} с"
+                ?: if (a.bytes > 0) "загрузка прервалась (получено ${a.bytes / 1024} КБ)" else "нет ответа"
             "${shortUrl(a.url)}: $why"
         }
         throw IOException(reasons.joinToString("; "))
     }
 
     /** Первый успешный по приоритету; запасной берём, если главный не ответил за 6 с. */
-    private suspend fun awaitWinner(attempts: List<Attempt>): Attempt? {
+    private suspend fun awaitWinner(attempts: List<Attempt>, stallMs: Long): Attempt? {
         val start = System.currentTimeMillis()
         while (true) {
+            val now = System.currentTimeMillis()
+            val stalled = attempts.filter { !it.result.isCompleted }.all { now - it.lastProgress > stallMs }
+            if (stalled && attempts.none { it.result.isCompleted && it.result.await().isSuccess }) return null
             for (a in attempts) {
                 if (!a.result.isCompleted) {
                     if (System.currentTimeMillis() - start < PRIMARY_GRACE_MS) break else continue
@@ -232,7 +240,19 @@ class ServerRepository(dir: File) {
         const val PRIMARY_GRACE_MS = 6_000L
     }
 
-    private fun httpGet(start: String, holder: Array<HttpURLConnection?>): String {
+    /** Отмечает, что данные идут. */
+    private class ProgressStream(private val inner: java.io.InputStream, private val a: Attempt) :
+        java.io.FilterInputStream(inner) {
+        override fun read(): Int = inner.read().also { if (it >= 0) progress(1L) }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = inner.read(b, off, len).also { if (it > 0) progress(it.toLong()) }
+        private fun progress(n: Long) {
+            a.bytes += n
+            a.lastProgress = System.currentTimeMillis()
+        }
+    }
+
+    private fun httpGet(start: String, attempt: Attempt): String {
+        val holder = attempt.conn
         var url = URL(start)
         repeat(5) {
             val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -242,6 +262,8 @@ class ServerRepository(dir: File) {
                 useCaches = false
                 setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) VpnGateClient/1.0")
                 setRequestProperty("Cache-Control", "no-cache")
+                // список ~0,5 МБ, сжатый — в 3–4 раза меньше (важно в медленной сети)
+                setRequestProperty("Accept-Encoding", "gzip")
             }
             holder[0] = conn
             try {
@@ -253,7 +275,10 @@ class ServerRepository(dir: File) {
                     return@repeat
                 }
                 if (code != HttpURLConnection.HTTP_OK) throw IOException("сервер ответил HTTP $code")
-                return conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                attempt.lastProgress = System.currentTimeMillis()
+                var input: java.io.InputStream = ProgressStream(conn.inputStream, attempt)
+                if (conn.contentEncoding.equals("gzip", ignoreCase = true)) input = java.util.zip.GZIPInputStream(input)
+                return input.bufferedReader(Charsets.UTF_8).use { it.readText() }
             } finally {
                 conn.disconnect()
             }
