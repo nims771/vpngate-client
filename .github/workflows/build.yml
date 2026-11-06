@@ -103,6 +103,14 @@ jobs:
           SSTP_LIVE_TEST: "1"
         run: ./gradlew :desktop:test --tests '*SstpLiveTest*' --rerun -i 2>&1 | grep -E "^\s*(---|  |Серверов|Успешно|.*FAILED)" || true
 
+      # полный туннель на сборщике: адаптер Wintun, маршруты, запрос через VPN
+      - name: Live tunnel test
+        continue-on-error: true
+        timeout-minutes: 6
+        env:
+          SSTP_TUNNEL_TEST: "1"
+        run: ./gradlew :desktop:test --tests '*SstpTunnelLiveTest*' --rerun
+
       - name: Build MSI and portable app
         run: ./gradlew :desktop:packageReleaseMsi :desktop:createReleaseDistributable
 

@@ -67,6 +67,9 @@ dependencies {
 tasks.test {
     useJUnit()
     systemProperty("screenshots.dir", layout.buildDirectory.dir("screenshots").get().asFile.absolutePath)
+    systemProperty("compose.application.resources.dir", project.file("resources/windows").absolutePath)
+    // тест полного туннеля печатает журнал
+    testLogging { showStandardStreams = System.getenv("SSTP_TUNNEL_TEST") != null }
 }
 
 compose.desktop {
