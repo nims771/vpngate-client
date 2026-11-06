@@ -17,3 +17,9 @@
 -dontwarn org.slf4j.**
 -dontwarn org.jetbrains.skiko.**
 -ignorewarnings
+
+# JNA: интерфейсы библиотек и структуры вызываются через рефлексию
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-keepclassmembers class * extends com.sun.jna.** { *; }
+-dontwarn com.sun.jna.**

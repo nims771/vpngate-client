@@ -11,7 +11,7 @@ plugins {
     id("org.jetbrains.compose")
 }
 
-val appVersion = "3.5.3"
+val appVersion = "3.6.0"
 val shared = rootProject.file("app/src/main/java")
 
 kotlin {
@@ -56,6 +56,9 @@ dependencies {
     implementation(compose.materialIconsExtended)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
     implementation("org.json:json:20240303")
+    // свой SSTP: адаптер Wintun и функции Windows через JNA
+    implementation("net.java.dev.jna:jna:5.15.0")
+    implementation("net.java.dev.jna:jna-platform:5.15.0")
 
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
@@ -81,6 +84,8 @@ compose.desktop {
 
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
+            // resources/windows/wintun.dll (скачивается в CI) попадает в папку программы
+            appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             packageName = "VPN Gate Client"
             packageVersion = appVersion
             description = "Client for free VPN Gate servers"

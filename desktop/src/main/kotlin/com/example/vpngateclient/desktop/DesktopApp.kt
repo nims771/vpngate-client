@@ -162,10 +162,11 @@ fun DesktopApp(
                     onChange = core::updateSettings,
                     onOpenLog = { showLog = true },
                     showSstpTuning = false,
-                    protocolHint = "SoftEther — тот же способ, что у программы VPN Gate на ПК, нужен установленный " +
-                        "SoftEther VPN Client. SSTP встроен в Windows и ничего не требует, но работает не со всеми серверами.",
+                    protocolHint = "SSTP — тот же способ, что в Android-версии: выглядит как обычный HTTPS и проходит " +
+                        "блокировки. Нужны права администратора (программа попросит их при запуске). " +
+                        "SoftEther — через установленный SoftEther VPN Client. «SSTP через Windows» — встроенный клиент Windows.",
                     aboutText = "Серверы: VPN Gate (Университет Цукубы), их держат добровольцы; серверы ведут журналы подключений.\n" +
-                        "Подключение: SoftEther VPN Client или встроенный SSTP Windows. Флаги: Twemoji (CC-BY 4.0).\n" +
+                        "SSTP: свой клиент + адаптер Wintun (WireGuard LLC). Флаги: Twemoji (CC-BY 4.0).\n" +
                         "Приложение распространяется по GPL v2, исходный код открыт.",
                     extraContent = {
                         WindowsCard(backend) { text -> scope.launch { snackbar.showSnackbar(text) } }
@@ -224,6 +225,15 @@ private fun WindowsCard(backend: WindowsVpnBackend, onMessage: (String) -> Unit)
     var busy by remember { mutableStateOf(false) }
     SectionCard(Modifier.fillMaxWidth()) {
         Text("Windows", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
+        Text(
+            if (Elevation.isAdmin) "Права администратора: есть ✔" else "Права администратора: нет — SSTP не подключится",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        if (!Elevation.isAdmin) {
+            OutlinedButton(onClick = { restartAsAdmin(backend) }, modifier = Modifier.padding(vertical = 6.dp)) {
+                Text("Перезапустить от администратора")
+            }
+        }
         val exe = backend.vpncmd
         Text(
             if (exe != null) "SoftEther VPN Client найден ✔" else "SoftEther VPN Client не установлен",
@@ -276,6 +286,7 @@ private fun exportOvpn(core: AppCore, server: VpnServer) {
         .onFailure { core.notify("Не удалось сохранить: ${it.message}") }
 }
 
-/** Протоколы Windows-версии: SoftEther первым, если он установлен. */
+/** Протоколы Windows-версии: свой SSTP (как на Android) — основной. */
+@Suppress("UNUSED_PARAMETER")
 fun desktopProtocols(backend: WindowsVpnBackend): List<Protocol> =
-    if (backend.vpncmd != null) listOf(Protocol.SOFTETHER, Protocol.SSTP) else listOf(Protocol.SSTP, Protocol.SOFTETHER)
+    listOf(Protocol.SSTP, Protocol.SOFTETHER, Protocol.WIN_SSTP)

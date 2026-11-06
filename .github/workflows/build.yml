@@ -80,8 +80,28 @@ jobs:
         with:
           validate-wrappers: false
 
+      # драйвер виртуального адаптера для своего SSTP (https://www.wintun.net, подписан WireGuard LLC)
+      - name: Download Wintun
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://www.wintun.net/builds/wintun-0.14.1.zip -OutFile wintun.zip
+          (Get-FileHash wintun.zip -Algorithm SHA256).Hash
+          Expand-Archive wintun.zip -DestinationPath wintun-tmp
+          $dll = "wintun-tmp/wintun/bin/amd64/wintun.dll"
+          $sig = Get-AuthenticodeSignature $dll
+          "$($sig.Status) $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'WireGuard LLC') { throw "wintun.dll signature check failed" }
+          Copy-Item $dll desktop/resources/windows/wintun.dll
+
       - name: Tests and screenshots
         run: ./gradlew :desktop:test
+
+      # свой SSTP-клиент против настоящих серверов VPN Gate (только согласование PPP, без адаптера)
+      - name: Live SSTP test
+        continue-on-error: true
+        env:
+          SSTP_LIVE_TEST: "1"
+        run: ./gradlew :desktop:test --tests '*SstpLiveTest*' --rerun -i 2>&1 | grep -E "^\s*(---|  |Серверов|Успешно|.*FAILED)" || true
 
       - name: Build MSI and portable app
         run: ./gradlew :desktop:packageReleaseMsi :desktop:createReleaseDistributable

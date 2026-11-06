@@ -194,7 +194,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
                 stopSstp()
                 startOpenVpn(server)
             }
-            Protocol.SSTP, Protocol.AUTO, Protocol.SOFTETHER -> {
+            Protocol.SSTP, Protocol.AUTO, Protocol.SOFTETHER, Protocol.WIN_SSTP -> {
                 if (active == Protocol.OPENVPN) stopOpenVpn()
                 active = null
                 // Предыдущий сеанс SSTP нужно сначала полностью закрыть

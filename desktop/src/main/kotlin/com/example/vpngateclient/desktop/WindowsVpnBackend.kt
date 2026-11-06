@@ -6,6 +6,8 @@ import com.example.vpngateclient.vpn.ConnectResult
 import com.example.vpngateclient.vpn.Protocol
 import com.example.vpngateclient.vpn.VpnBackend
 import com.example.vpngateclient.vpn.VpnStatus
+import com.example.vpngateclient.desktop.sstp.SstpTunnel
+import com.example.vpngateclient.desktop.sstp.Wintun
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -90,7 +92,16 @@ class WindowsVpnBackend : VpnBackend {
 
     override suspend fun connect(server: VpnServer, settings: AppSettings): ConnectResult {
         if (!isWindows) return ConnectResult.Error("Подключение работает только в Windows")
-        val proto = if (settings.protocol == Protocol.SOFTETHER) Protocol.SOFTETHER else Protocol.SSTP
+        val proto = when (settings.protocol) {
+            Protocol.SOFTETHER -> Protocol.SOFTETHER
+            Protocol.WIN_SSTP -> Protocol.WIN_SSTP
+            else -> Protocol.SSTP
+        }
+        if (proto == Protocol.SSTP && !Elevation.isAdmin) {
+            return ConnectResult.Error(
+                "Для SSTP нужны права администратора: Настройки → «Перезапустить от администратора»"
+            )
+        }
         if (proto == Protocol.SOFTETHER && vpncmd == null) {
             return ConnectResult.Error(
                 "SoftEther VPN Client не найден. Установите его (Настройки → «Скачать») или выберите протокол SSTP."
@@ -100,7 +111,11 @@ class WindowsVpnBackend : VpnBackend {
         cleanup?.join()
         job?.cancel()
         active = proto
-        val label = if (proto == Protocol.SOFTETHER) "SoftEther" else "SSTP"
+        val label = when (proto) {
+            Protocol.SOFTETHER -> "SoftEther"
+            Protocol.WIN_SSTP -> "SSTP Windows"
+            else -> "SSTP"
+        }
         // статус «подключение» ставим сразу: AppCore ждёт либо успеха, либо ошибки
         _status.value = lvl(
             VpnStatus(
@@ -118,7 +133,11 @@ class WindowsVpnBackend : VpnBackend {
             // 1. туннель
             val ok = ops.withLock {
                 runCatching {
-                    if (proto == Protocol.SOFTETHER) connectSoftEther(server) else connectSstp(server)
+                    when (proto) {
+                        Protocol.SOFTETHER -> connectSoftEther(server)
+                        Protocol.WIN_SSTP -> connectSstp(server)
+                        else -> connectEngine(server, settings)
+                    }
                 }.onFailure { e ->
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     addLog("Ошибка: ${e.message ?: e.javaClass.simpleName}")
@@ -173,11 +192,15 @@ class WindowsVpnBackend : VpnBackend {
         while (currentCoroutineContext().isActive) {
             delay(4_000)
             val alive = runCatching {
-                if (proto == Protocol.SOFTETHER) softEtherEstablished() != false else sstpConnected()
+                when (proto) {
+                    Protocol.SOFTETHER -> softEtherEstablished() != false
+                    Protocol.WIN_SSTP -> sstpConnected()
+                    else -> tunnel?.alive == true
+                }
             }.getOrDefault(true)
             deadChecks = if (alive) 0 else deadChecks + 1
             if (deadChecks >= 2) {
-                drop(proto, "Сервер разорвал соединение")
+                drop(proto, tunnel?.closeReason?.let { "Соединение оборвалось: $it" } ?: "Сервер разорвал соединение")
                 return
             }
         }
@@ -194,8 +217,14 @@ class WindowsVpnBackend : VpnBackend {
         if (active == proto) active = null
         ops.withLock {
             runCatching {
-                if (proto == Protocol.SOFTETHER) vpncmd("AccountDisconnect", ACCOUNT)
-                else run(listOf("rasdial", RAS_NAME, "/disconnect"), 20)
+                when (proto) {
+                    Protocol.SOFTETHER -> vpncmd("AccountDisconnect", ACCOUNT)
+                    Protocol.WIN_SSTP -> run(listOf("rasdial", RAS_NAME, "/disconnect"), 20)
+                    else -> {
+                        tunnel?.stop()
+                        tunnel = null
+                    }
+                }
             }
         }
     }
@@ -227,7 +256,9 @@ class WindowsVpnBackend : VpnBackend {
     private fun findVpnInterface(proto: Protocol): java.net.NetworkInterface? = runCatching {
         java.net.NetworkInterface.getNetworkInterfaces().toList().firstOrNull { nif ->
             val d = nif.displayName.orEmpty()
-            if (proto == Protocol.SOFTETHER) {
+            if (proto == Protocol.SSTP) {
+                d.equals(Wintun.NAME, true) || nif.name.equals(Wintun.NAME, true) || d.contains("Wintun", true)
+            } else if (proto == Protocol.SOFTETHER) {
                 d.contains("VPN Client Adapter", true) && d.trim().endsWith("- $currentNic", true)
             } else {
                 d.equals(RAS_NAME, true) || (nif.isUp && nif.isPointToPoint && nif.name.startsWith("ppp"))
@@ -455,6 +486,24 @@ class WindowsVpnBackend : VpnBackend {
     }
 
     // ------------------------------------------------------------------ Windows SSTP
+
+    // ------------------------------------------------------------------ свой SSTP (как на Android)
+
+    @Volatile private var tunnel: SstpTunnel? = null
+
+    private fun connectEngine(server: VpnServer, settings: AppSettings): Boolean {
+        tunnel?.stop()
+        val t = SstpTunnel(server.ip, server.sstpPort, settings.sstpMtu.coerceIn(1200, 1500), ::addLog)
+        tunnel = t
+        return try {
+            t.start()
+            true
+        } catch (e: Exception) {
+            tunnel = null
+            addLog("SSTP: ${e.message ?: e.javaClass.simpleName}")
+            false
+        }
+    }
 
     private suspend fun connectSstp(server: VpnServer): Boolean {
         // сертификат VPN Gate выдан на имя *.opengw.net, поэтому подключаемся по имени, не по IP

@@ -450,7 +450,7 @@ class AppCore(
             Protocol.SSTP -> 40_000L
             Protocol.OPENVPN -> 70_000L
             Protocol.AUTO -> 110_000L
-            Protocol.SOFTETHER -> 45_000L
+            Protocol.SOFTETHER, Protocol.WIN_SSTP -> 45_000L
         }
         val final = withTimeoutOrNull(timeout) {
             vpn.status.first { it.isConnected || it.level in FAILED_LEVELS }

@@ -22,6 +22,7 @@ import com.example.vpngateclient.data.ServerRepository
 import com.example.vpngateclient.ui.AppCore
 import com.example.vpngateclient.ui.LocalFlagFont
 import com.example.vpngateclient.ui.theme.AppTheme
+import com.example.vpngateclient.vpn.Protocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,7 +32,7 @@ import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import kotlin.system.exitProcess
 
-val APP_VERSION: String = System.getProperty("jpackage.app-version") ?: "3.5.3"
+val APP_VERSION: String = System.getProperty("jpackage.app-version") ?: "3.6.0"
 
 /** Шрифт Twemoji с флагами стран (в Windows своих флагов-эмодзи нет). */
 fun loadFlagFont(): FontFamily? = runCatching {
@@ -44,7 +45,7 @@ fun createCore(backend: WindowsVpnBackend, dir: File, scope: CoroutineScope): Ap
     return AppCore(
         scope = scope,
         repo = ServerRepository(dir),
-        settingsStore = DesktopSettingsStore(dir, defaultProtocol = protocols.first()),
+        settingsStore = desktopSettings(dir),
         favoritesStore = FavoritesStore(dir),
         prefs = DesktopKeyValueStore(dir, "ui"),
         vpn = backend,
@@ -52,10 +53,40 @@ fun createCore(backend: WindowsVpnBackend, dir: File, scope: CoroutineScope): Ap
     )
 }
 
+/**
+ * Настройки Windows-версии. С 3.6 основной протокол — свой SSTP (как на Android);
+ * у тех, кто раньше был на SoftEther, один раз переключаем на него.
+ */
+fun desktopSettings(dir: File): DesktopSettingsStore {
+    val store = DesktopSettingsStore(dir, defaultProtocol = Protocol.SSTP)
+    val ui = DesktopKeyValueStore(dir, "ui")
+    if (ui.getString("proto_v36") == null) {
+        val s = store.load()
+        if (s.protocol != Protocol.SSTP) store.save(s.copy(protocol = Protocol.SSTP))
+        ui.putString("proto_v36", "1")
+    }
+    return store
+}
+
 private var instanceLock: FileLock? = null
+
+/** Перезапуск с правами администратора (кнопка в настройках). */
+fun restartAsAdmin(backend: WindowsVpnBackend) {
+    backend.shutdown()
+    runCatching { instanceLock?.release() }
+    if (Elevation.relaunchAsAdmin()) exitProcess(0)
+    // отказались в окне UAC — продолжаем работать как есть
+    instanceLock = runCatching { RandomAccessFile(File(DesktopPaths.appDir, ".lock"), "rw").channel.tryLock() }.getOrNull()
+}
 
 fun main() {
     val dir = DesktopPaths.appDir
+    // свой SSTP требует прав администратора — сразу просим их (кроме проверки сборки в CI)
+    if (!Elevation.isAdmin && System.getenv("VPNGATE_SMOKE_TEST") == null &&
+        desktopSettings(dir).load().protocol == Protocol.SSTP
+    ) {
+        if (Elevation.relaunchAsAdmin()) exitProcess(0)
+    }
     // второй экземпляр не запускаем: два клиента будут мешать друг другу
     instanceLock = runCatching { RandomAccessFile(File(dir, ".lock"), "rw").channel.tryLock() }.getOrNull()
     if (instanceLock == null) {

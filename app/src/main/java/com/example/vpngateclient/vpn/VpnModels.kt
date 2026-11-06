@@ -56,6 +56,8 @@ enum class Protocol(val label: String) {
     OPENVPN("OpenVPN"),
     /** Только Windows: протокол SoftEther через установленный SoftEther VPN Client. */
     SOFTETHER("SoftEther (как VPN Gate на ПК)"),
+    /** Только Windows: встроенный в Windows SSTP-клиент (rasdial). */
+    WIN_SSTP("SSTP через Windows (rasdial)"),
 }
 
 sealed interface ConnectResult {
