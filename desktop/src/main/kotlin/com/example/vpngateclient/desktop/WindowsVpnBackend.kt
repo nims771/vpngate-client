@@ -601,7 +601,7 @@ class WindowsVpnBackend : VpnBackend {
 
     companion object {
         const val ACCOUNT = "VPNGateClient"
-        const val RAS_NAME = "VPN Gate Client (SSTP)"
+        const val RAS_NAME = "ProXvpn (SSTP)"
         private val STEPS = listOf("Сервер", "Сеанс VPN", "Интернет")
 
         private const val MAX_LOG = 400

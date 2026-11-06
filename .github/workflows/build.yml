@@ -38,7 +38,18 @@ jobs:
           ./gradlew :app:testDebugUnitTest --tests '*VpnGateParserTest'
 
       - name: Build APK
-        run: ./gradlew :app:assembleRelease
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+            echo "Подпись: постоянный ключ"
+          else
+            echo "::warning::Секрет ANDROID_KEYSTORE_B64 не задан — APK подписан временным ключом, обновление поверх старой версии не сработает"
+          fi
+          ./gradlew :app:assembleRelease
 
       # Скриншоты экранов (Robolectric) — для проверки дизайна
       - name: Screenshots
@@ -46,12 +57,12 @@ jobs:
         run: ./gradlew :app:recordRoborazziDebug
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk VpnGateClient.apk
+        run: cp app/build/outputs/apk/release/app-release.apk ProXvpn.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: VpnGateClient-apk
-          path: VpnGateClient.apk
+          name: apk
+          path: ProXvpn.apk
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -120,7 +131,7 @@ jobs:
         env:
           VPNGATE_SMOKE_TEST: "1"
         run: |
-          $exe = "desktop/build/compose/binaries/main-release/app/VPN Gate Client/VPN Gate Client.exe"
+          $exe = "desktop/build/compose/binaries/main-release/app/ProXvpn/ProXvpn.exe"
           $p = Start-Process -FilePath $exe -PassThru
           if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "app did not exit in 60 s" }
           if ($p.ExitCode -ne 0) { throw "app exit code $($p.ExitCode)" }
@@ -133,9 +144,9 @@ jobs:
       - name: Collect files
         run: |
           mkdir -p dist
-          cp desktop/build/compose/binaries/main-release/msi/*.msi "dist/VpnGateClient-Windows.msi"
+          cp desktop/build/compose/binaries/main-release/msi/*.msi "dist/ProXvpn-Windows.msi"
           cd desktop/build/compose/binaries/main-release/app
-          7z a -tzip "$GITHUB_WORKSPACE/dist/VpnGateClient-Windows-portable.zip" "VPN Gate Client" > /dev/null
+          7z a -tzip "$GITHUB_WORKSPACE/dist/ProXvpn-Windows-portable.zip" "ProXvpn" > /dev/null
           ls -la "$GITHUB_WORKSPACE/dist"
 
       - uses: actions/upload-artifact@v4
@@ -162,20 +173,42 @@ jobs:
         with:
           path: art
 
+      - name: Update manifest (version.json)
+        run: |
+          VC=$(grep -oP 'versionCode = \K[0-9]+' app/build.gradle.kts)
+          VN=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          WV=$(grep -oP 'val appVersion = "\K[^"]+' desktop/build.gradle.kts)
+          APK=art/apk/ProXvpn.apk
+          MSI=art/windows/ProXvpn-Windows.msi
+          NOTES=$(git log -1 --pretty=%s)
+          python3 - "$VC" "$VN" "$WV" "$NOTES" <<'PY'
+          import json, os, sys
+          vc, vn, wv, notes = sys.argv[1:5]
+          m = {"build": int(os.environ["GITHUB_RUN_NUMBER"]), "notes": notes}
+          if os.path.exists("art/apk/ProXvpn.apk"):
+              m["android"] = {"versionCode": int(vc), "versionName": vn, "file": "ProXvpn.apk",
+                              "size": os.path.getsize("art/apk/ProXvpn.apk")}
+          if os.path.exists("art/windows/ProXvpn-Windows.msi"):
+              m["windows"] = {"version": wv, "file": "ProXvpn-Windows.msi",
+                              "size": os.path.getsize("art/windows/ProXvpn-Windows.msi")}
+          json.dump(m, open("version.json", "w"), ensure_ascii=False, indent=1)
+          PY
+          cat version.json
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${{ github.run_number }}"
-          FILES="art/VpnGateClient-apk/VpnGateClient.apk"
+          FILES="art/apk/ProXvpn.apk version.json"
           NOTES="Автоматическая сборка из коммита ${GITHUB_SHA::7}.
-          • VpnGateClient.apk — Android
-          • VpnGateClient-Windows.msi — установщик для Windows 10/11
-          • VpnGateClient-Windows-portable.zip — Windows без установки (запуск: VPN Gate Client.exe)"
+          • ProXvpn.apk — Android
+          • ProXvpn-Windows.msi — установщик для Windows 10/11
+          • ProXvpn-Windows-portable.zip — Windows без установки (запуск: ProXvpn.exe)"
           if [ -d art/windows ]; then FILES="$FILES art/windows/*"; else NOTES="$NOTES
           (Windows-сборка в этот раз не удалась)"; fi
           gh release create "$TAG" $FILES \
-            --title "VPN Gate Client (сборка ${{ github.run_number }})" \
+            --title "ProXvpn (сборка ${{ github.run_number }})" \
             --notes "$NOTES" --latest
 
       - name: Publish screenshots

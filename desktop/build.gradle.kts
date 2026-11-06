@@ -1,4 +1,4 @@
-// VPN Gate Client для Windows (Compose Desktop).
+// ProXvpn для Windows (Compose Desktop).
 // Экраны, загрузка списка, пинг и автовыбор — общий код из app/ (без Android-зависимостей),
 // здесь только окно, хранилище настроек и VPN-движок Windows.
 
@@ -11,7 +11,7 @@ plugins {
     id("org.jetbrains.compose")
 }
 
-val appVersion = "3.6.0"
+val appVersion = "4.0.0"
 val shared = rootProject.file("app/src/main/java")
 
 kotlin {
@@ -26,6 +26,7 @@ kotlin {
                 "com/example/vpngateclient/data/VpnServer.kt",
                 "com/example/vpngateclient/data/VpnGateParser.kt",
                 "com/example/vpngateclient/data/Storage.kt",
+                "com/example/vpngateclient/data/Updates.kt",
                 "com/example/vpngateclient/vpn/OvpnConfig.kt",
                 "com/example/vpngateclient/vpn/VpnModels.kt",
                 "com/example/vpngateclient/net/PingChecker.kt",
@@ -37,6 +38,7 @@ kotlin {
                 "com/example/vpngateclient/ui/CountriesScreen.kt",
                 "com/example/vpngateclient/ui/SettingsScreen.kt",
                 "com/example/vpngateclient/ui/Dialogs.kt",
+                "com/example/vpngateclient/ui/UpdateUi.kt",
                 "com/example/vpngateclient/ui/theme/Theme.kt",
                 // собственный код Windows-версии
                 "com/example/vpngateclient/desktop/**",
@@ -89,10 +91,10 @@ compose.desktop {
             targetFormats(TargetFormat.Msi)
             // resources/windows/wintun.dll (скачивается в CI) попадает в папку программы
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
-            packageName = "VPN Gate Client"
+            packageName = "ProXvpn"
             packageVersion = appVersion
             description = "Client for free VPN Gate servers"
-            vendor = "VPN Gate Client"
+            vendor = "ProXvpn"
             copyright = "GPL v2"
             // только нужные модули JDK: установщик в ~2 раза меньше, чем со всеми
             modules(
@@ -103,7 +105,7 @@ compose.desktop {
 
             windows {
                 menu = true
-                menuGroup = "VPN Gate Client"
+                menuGroup = "ProXvpn"
                 shortcut = true
                 perUserInstall = true
                 dirChooser = true

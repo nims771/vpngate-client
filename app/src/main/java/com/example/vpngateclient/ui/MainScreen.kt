@@ -54,6 +54,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val state by core.state.collectAsStateWithLifecycle()
     val vpnStatus by core.vpnStatus.collectAsStateWithLifecycle()
     val vpnLog by core.vpnLog.collectAsStateWithLifecycle()
+    val updateState by core.update.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -105,7 +106,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         topBar = {
             if (tab == TAB_VPN) {
                 CenterAlignedTopAppBar(
-                    title = { Text("VPN Gate", style = MaterialTheme.typography.titleLarge) },
+                    title = { Text("ProXvpn", style = MaterialTheme.typography.titleLarge) },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = MaterialTheme.colorScheme.background,
                     ),
@@ -183,6 +184,9 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                     versionName = versionName,
                     onChange = core::updateSettings,
                     onOpenLog = { showLog = true },
+                    updates = {
+                        UpdateCard(updateState, core.currentVersion, { core.checkUpdates(true) }, core::installUpdate)
+                    },
                 )
             }
         }
@@ -220,6 +224,15 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
             },
         )
     }
+
+    UpdateDialog(
+        state = updateState,
+        onUpdate = {
+            core.dismissUpdatePrompt()
+            core.installUpdate()
+        },
+        onLater = core::dismissUpdatePrompt,
+    )
 
     if (showLog) {
         LogDialog(

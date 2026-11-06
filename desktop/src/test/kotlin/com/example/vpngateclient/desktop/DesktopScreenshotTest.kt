@@ -146,8 +146,16 @@ class DesktopScreenshotTest {
             versionName = APP_VERSION,
             onChange = {},
             onOpenLog = {},
-            protocols = listOf(Protocol.SOFTETHER, Protocol.SSTP),
+            protocols = listOf(Protocol.SSTP, Protocol.SOFTETHER, Protocol.WIN_SSTP),
             showSstpTuning = false,
+            updates = {
+                com.example.vpngateclient.ui.UpdateCard(
+                    com.example.vpngateclient.data.UpdateState.Downloading(
+                        com.example.vpngateclient.data.UpdateInfo("4.0.1", "", "", 61_000_000, "github.com"), 0.42f,
+                    ),
+                    "4.0.0", {}, {},
+                )
+            },
         )
     }
 

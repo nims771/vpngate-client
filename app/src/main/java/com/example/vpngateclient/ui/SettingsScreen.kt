@@ -52,6 +52,8 @@ fun SettingsScreen(
         "SSTP: Open SSTP Client (MIT). OpenVPN: OpenVPN for Android (GPL v2).\n" +
         "Приложение распространяется по GPL v2, исходный код открыт.",
     extraContent: @Composable () -> Unit = {},
+    /** Карточка обновлений (перед «О приложении»). */
+    updates: @Composable () -> Unit = {},
 ) {
     Column(
         Modifier
@@ -190,10 +192,12 @@ fun SettingsScreen(
             }
         }
 
+        updates()
+
         // ---- О приложении ----
         SectionCard(Modifier.fillMaxWidth()) {
             CardTitle("О приложении")
-            Hint("VPN Gate Client $versionName\n$aboutText")
+            Hint("ProXvpn $versionName")
         }
         Spacer(Modifier.height(16.dp))
     }

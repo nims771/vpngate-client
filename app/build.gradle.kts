@@ -18,10 +18,22 @@ android {
         applicationId = "com.example.vpngateclient"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "3.4.0"
+        versionCode = 14
+        versionName = "4.0.0"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    // Постоянный ключ подписи из секретов GitHub (ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD).
+    // Нужен, чтобы новые версии ставились поверх старых и работало обновление из приложения.
+    val releaseKeystore = System.getenv("ANDROID_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.isFile }
+    signingConfigs {
+        if (releaseKeystore != null) create("release") {
+            storeFile = releaseKeystore
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: "proxvpn"
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")
         }
     }
 
@@ -35,9 +47,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Для личного использования release подписывается debug-ключом.
-            // Перед публикацией в Google Play замените на свой ключ.
-            signingConfig = signingConfigs.getByName("debug")
+            // Без секретов (например, в форке) — временный debug-ключ.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

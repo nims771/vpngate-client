@@ -88,8 +88,8 @@ class Wintun private constructor(private val lib: Lib, private val adapter: Poin
     }
 
     companion object {
-        const val NAME = "VPN Gate SSTP"
-        private const val TYPE = "VPN Gate"
+        const val NAME = "ProXvpn"
+        private const val TYPE = "ProXvpn"
 
         /** Постоянный GUID — Windows запоминает сеть и не спрашивает про неё каждый раз. */
         private val GUID = byteArrayOf(

@@ -11,6 +11,7 @@ import com.example.vpngateclient.data.ServerRepository
 import com.example.vpngateclient.data.SettingsStore
 import com.example.vpngateclient.data.VpnServer
 import com.example.vpngateclient.vpn.Protocol
+import com.example.vpngateclient.update.AndroidUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -26,6 +27,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         prefs = PrefsKeyValueStore(app, "ui"),
         vpn = (app as App).vpn,
         protocols = listOf(Protocol.AUTO, Protocol.SSTP, Protocol.OPENVPN),
+        updater = AndroidUpdater(app),
     )
 
     var pendingExport: VpnServer? = null

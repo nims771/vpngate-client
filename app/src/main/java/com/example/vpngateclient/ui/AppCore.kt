@@ -6,6 +6,9 @@ import com.example.vpngateclient.data.KeyValueStore
 import com.example.vpngateclient.data.Selection
 import com.example.vpngateclient.data.ServerRepository
 import com.example.vpngateclient.data.SettingsPersistence
+import com.example.vpngateclient.data.UpdatePlatform
+import com.example.vpngateclient.data.UpdateState
+import com.example.vpngateclient.data.Updates
 import com.example.vpngateclient.data.VpnServer
 import com.example.vpngateclient.net.PingChecker
 import com.example.vpngateclient.net.SpeedTest
@@ -146,7 +149,58 @@ class AppCore(
     private val vpn: VpnBackend,
     /** Какие протоколы доступны на этой платформе (для экрана настроек). */
     val protocols: List<Protocol>,
+    /** Обновление приложения (null — без обновлений, например в тестах). */
+    private val updater: UpdatePlatform? = null,
 ) {
+
+    // ------------------------------------------------------------------ обновления
+
+    private val _update = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val update: StateFlow<UpdateState> = _update.asStateFlow()
+    val currentVersion: String get() = updater?.currentVersion.orEmpty()
+    private var updateJob: Job? = null
+
+    /** Проверка обновлений. manual — по кнопке (показываем и «нет обновлений», и ошибки). */
+    fun checkUpdates(manual: Boolean = true) {
+        val u = updater ?: return
+        if (updateJob?.isActive == true) return
+        updateJob = scope.launch {
+            if (manual) _update.value = UpdateState.Checking
+            val result = runCatching {
+                kotlinx.coroutines.withContext(Dispatchers.IO) { Updates.check(_state.value.settings.listUrl, u) }
+            }
+            _update.value = result.fold(
+                onSuccess = { info ->
+                    if (info == null) (if (manual) UpdateState.UpToDate else UpdateState.Idle)
+                    else UpdateState.Available(info, prompt = !manual)
+                },
+                onFailure = { if (manual) UpdateState.Error(it.message ?: "ошибка") else UpdateState.Idle },
+            )
+        }
+    }
+
+    /** Закрыть окно «Доступно обновление» (обновление остаётся в настройках). */
+    fun dismissUpdatePrompt() {
+        (_update.value as? UpdateState.Available)?.let { _update.value = it.copy(prompt = false) }
+    }
+
+    fun installUpdate() {
+        val u = updater ?: return
+        val info = when (val st = _update.value) {
+            is UpdateState.Available -> st.info
+            is UpdateState.Error -> st.info
+            else -> null
+        } ?: return
+        if (updateJob?.isActive == true) return
+        updateJob = scope.launch {
+            _update.value = UpdateState.Downloading(info, 0f)
+            val error = runCatching {
+                u.install(info) { p -> _update.value = UpdateState.Downloading(info, p) }
+            }.getOrElse { it.message ?: "ошибка" }
+            _update.value = if (error == null) UpdateState.Available(info, prompt = false)
+            else UpdateState.Error(error, info)
+        }
+    }
 
     private val _state = MutableStateFlow(
         UiState(
@@ -167,6 +221,11 @@ class AppCore(
     private var permissionWait: CompletableDeferred<Boolean>? = null
 
     init {
+        // автоматическая проверка обновлений через несколько секунд после запуска
+        if (updater != null) scope.launch {
+            delay(4_000)
+            checkUpdates(manual = false)
+        }
         // Таймер подключения и автопереподключение при обрыве
         scope.launch {
             var wasConnected = false

@@ -32,7 +32,7 @@ import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import kotlin.system.exitProcess
 
-val APP_VERSION: String = System.getProperty("jpackage.app-version") ?: "3.6.0"
+val APP_VERSION: String = System.getProperty("jpackage.app-version") ?: "4.0.0"
 
 /** Шрифт Twemoji с флагами стран (в Windows своих флагов-эмодзи нет). */
 fun loadFlagFont(): FontFamily? = runCatching {
@@ -50,6 +50,11 @@ fun createCore(backend: WindowsVpnBackend, dir: File, scope: CoroutineScope): Ap
         prefs = DesktopKeyValueStore(dir, "ui"),
         vpn = backend,
         protocols = protocols,
+        updater = WindowsUpdater(onExit = {
+            backend.shutdown()
+            runCatching { instanceLock?.release() }
+            exitProcess(0)
+        }),
     )
 }
 
@@ -91,7 +96,7 @@ fun main() {
     instanceLock = runCatching { RandomAccessFile(File(dir, ".lock"), "rw").channel.tryLock() }.getOrNull()
     if (instanceLock == null) {
         javax.swing.JOptionPane.showMessageDialog(
-            null, "VPN Gate Client уже запущен (значок в области уведомлений).", "VPN Gate Client",
+            null, "ProXvpn уже запущен (значок в области уведомлений).", "ProXvpn",
             javax.swing.JOptionPane.INFORMATION_MESSAGE,
         )
         exitProcess(0)
@@ -120,7 +125,7 @@ fun main() {
         if (icon != null) {
             Tray(
                 icon = icon,
-                tooltip = "VPN Gate Client — ${status.title}",
+                tooltip = "ProXvpn — ${status.title}",
                 onAction = { visible = true },
                 menu = {
                     Item("Открыть", onClick = { visible = true })
@@ -140,7 +145,7 @@ fun main() {
                 if (status.isActive && icon != null) visible = false else quit()
             },
             visible = visible,
-            title = "VPN Gate Client" + if (status.isConnected) " — ${status.title}" else "",
+            title = "ProXvpn" + if (status.isConnected) " — ${status.title}" else "",
             icon = icon,
             state = rememberWindowState(size = DpSize(440.dp, 860.dp), position = WindowPosition.PlatformDefault),
         ) {

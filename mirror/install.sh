@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  VPN Gate Client — установщик зеркала списка серверов
+#  ProXvpn — установщик зеркала списка серверов (и обновлений приложения)
 #
 #  Что делает (спрашивает всё по ходу):
 #    • ставит python3, nginx, certbot;
@@ -8,6 +8,7 @@
 #    • запускает обновление списка по расписанию (systemd-таймер);
 #    • настраивает nginx: HTTPS с бесплатным сертификатом Let's Encrypt
 #      для вашего домена (или HTTP по IP, если домена нет);
+#    • раздаёт обновления приложения ProXvpn (APK и MSI) с вашего домена;
 #    • в конце показывает готовый адрес для приложения.
 #
 #  Запуск:     sudo bash install.sh
@@ -500,6 +501,58 @@ def write_atomic(path: str, rows) -> None:
     os.replace(tmp, path)
 
 
+# ---------------------------------------------------------------------------
+# Обновления приложения ProXvpn: раз в полчаса смотрим последний выпуск на GitHub
+# и кладём APK/MSI + version.json рядом со списком (…/<секрет>/proxvpn/).
+# Приложения сначала ищут обновление здесь, на вашем домене, и только потом на GitHub.
+# ---------------------------------------------------------------------------
+DEFAULT_UPDATES_REPO = "nims771/vpngate-client"
+
+
+def _download(url: str, timeout: int = 120) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": "ProXvpn-mirror", "Accept": "*/*"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def sync_updates(dest: str, repo: str, every: int = 1800) -> None:
+    import json
+    os.makedirs(dest, exist_ok=True)
+    stamp = os.path.join(dest, ".checked")
+    if os.path.exists(stamp) and time.time() - os.path.getmtime(stamp) < every:
+        return
+    with open(stamp, "w") as f:
+        f.write(time.strftime("%Y-%m-%d %H:%M:%S"))
+    rel = json.loads(_download(f"https://api.github.com/repos/{repo}/releases/latest", 30))
+    assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
+    if "version.json" not in assets:
+        log(f"обновления: в выпуске {rel.get('tag_name')} нет version.json — пропускаем")
+        return
+    new_meta = _download(assets["version.json"], 30)
+    cur_path = os.path.join(dest, "version.json")
+    if os.path.exists(cur_path) and open(cur_path, "rb").read() == new_meta:
+        return
+    meta = json.loads(new_meta)
+    for key in ("android", "windows"):
+        entry = meta.get(key) or {}
+        name = entry.get("file")
+        if not name or "/" in name or name not in assets:
+            continue
+        data = _download(assets[name], 600)
+        tmp = os.path.join(dest, name + ".tmp")
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, os.path.join(dest, name))
+        log(f"обновления: {name} ({len(data) // 1024} КБ)")
+    tmp = cur_path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(new_meta)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, cur_path)
+    log(f"обновления: выпуск {rel.get('tag_name')} опубликован в {dest}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Зеркало списка серверов VPN Gate (v2)")
     ap.add_argument("--out", required=True, help="куда сохранить CSV (например /var/www/vpngate/servers.csv)")
@@ -518,9 +571,19 @@ def main() -> int:
     ap.add_argument("--min-alive", type=int, default=10,
                     help="если живых меньше — сохранить непроверенный список (защита от сбоя сети)")
     ap.add_argument("--no-tls", action="store_true", help=argparse.SUPPRESS)  # совместимость с v1
+    ap.add_argument("--updates-dir", help="куда класть обновления приложения (по умолчанию <папка списка>/proxvpn)")
+    ap.add_argument("--updates-repo", default=DEFAULT_UPDATES_REPO, help="репозиторий GitHub с выпусками")
+    ap.add_argument("--no-updates", action="store_true", help="не зеркалировать обновления приложения")
     args = ap.parse_args()
     if args.no_tls:
         args.mode = "tcp"
+
+    if not args.no_updates:
+        try:
+            sync_updates(args.updates_dir or os.path.join(os.path.dirname(os.path.abspath(args.out)), "proxvpn"),
+                         args.updates_repo)
+        except Exception as e:  # noqa: BLE001
+            log(f"обновления: ошибка: {e}")
 
     # ---- API
     api_rows = []
@@ -638,6 +701,23 @@ update_mirror() {
     step "Обновление скрипта зеркала"
     write_mirror_script
     ok "Скрипт обновлён: $INSTALL_DIR/vpngate_mirror.py"
+    # shellcheck disable=SC1090
+    . "$CONF_FILE"
+    # раздача обновлений приложения ProXvpn: …/<секрет>/proxvpn/
+    local nconf
+    nconf="$(nginx_conf_path)"
+    mkdir -p "$DATA_DIR/proxvpn"
+    if [ -f "$nconf" ] && ! grep -q "/$SECRET/proxvpn/" "$nconf"; then
+        cp "$nconf" "$nconf.bak"
+        sed -i "s#^    location = /$SECRET/servers.csv {#    location /$SECRET/proxvpn/ {\n        alias $DATA_DIR/proxvpn/;\n        add_header Cache-Control \"no-cache\";\n    }\n&#" "$nconf"
+        if nginx -t >/dev/null 2>&1; then
+            systemctl reload nginx
+            ok "nginx: добавлена раздача обновлений приложения"
+        else
+            mv "$nconf.bak" "$nconf"
+            warn "nginx не принял изменения — оставил прежние настройки"
+        fi
+    fi
     info "Запускаю обновление списка (до пары минут)…"
     systemctl start "$SERVICE.service" || true
     journalctl -u "$SERVICE" -n 8 --no-pager 2>/dev/null | sed 's/^/   /' || true
@@ -803,7 +883,11 @@ ok "Таймер включён (журнал: journalctl -u $SERVICE)"
 
 NGINX_CONF="$(nginx_conf_path)"
 mkdir -p "$(dirname "$NGINX_CONF")"
-LOCATION_BLOCK="    location = /$SECRET/servers.csv {
+LOCATION_BLOCK="    location /$SECRET/proxvpn/ {
+        alias $DATA_DIR/proxvpn/;
+        add_header Cache-Control \"no-cache\";
+    }
+    location = /$SECRET/servers.csv {
         alias $DATA_DIR/servers.csv;
         default_type text/plain;
         add_header Cache-Control \"public, max-age=120\";

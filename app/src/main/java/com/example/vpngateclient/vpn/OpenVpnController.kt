@@ -272,7 +272,7 @@ class OpenVpnController(context: Context) : EngineStatus.StateListener, EngineSt
                         serverId = server.id, serverName = name, protocol = "OpenVPN",
                     )
                 }
-                VPNLaunchHelper.startOpenVpn(profile, appContext, "VPN Gate Client", true)
+                VPNLaunchHelper.startOpenVpn(profile, appContext, "ProXvpn", true)
                 ConnectResult.Started
             } catch (e: Exception) {
                 ConnectResult.Error("Не удалось запустить OpenVPN: ${e.message ?: e.javaClass.simpleName}")

@@ -46,6 +46,8 @@ import com.example.vpngateclient.ui.SectionCard
 import com.example.vpngateclient.ui.ServerDetailsSheet
 import com.example.vpngateclient.ui.SettingsScreen
 import com.example.vpngateclient.ui.UiEvent
+import com.example.vpngateclient.ui.UpdateCard
+import com.example.vpngateclient.ui.UpdateDialog
 import com.example.vpngateclient.vpn.Protocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -73,6 +75,7 @@ fun DesktopApp(
     val state by core.state.collectAsState()
     val vpnStatus by core.vpnStatus.collectAsState()
     val vpnLog by core.vpnLog.collectAsState()
+    val updateState by core.update.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -96,7 +99,7 @@ fun DesktopApp(
         topBar = {
             if (tab == TAB_VPN) {
                 CenterAlignedTopAppBar(
-                    title = { Text("VPN Gate", style = MaterialTheme.typography.titleLarge) },
+                    title = { Text("ProXvpn", style = MaterialTheme.typography.titleLarge) },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = MaterialTheme.colorScheme.background,
                     ),
@@ -168,6 +171,9 @@ fun DesktopApp(
                     aboutText = "Серверы: VPN Gate (Университет Цукубы), их держат добровольцы; серверы ведут журналы подключений.\n" +
                         "SSTP: свой клиент + адаптер Wintun (WireGuard LLC). Флаги: Twemoji (CC-BY 4.0).\n" +
                         "Приложение распространяется по GPL v2, исходный код открыт.",
+                    updates = {
+                        UpdateCard(updateState, core.currentVersion, { core.checkUpdates(true) }, core::installUpdate)
+                    },
                     extraContent = {
                         WindowsCard(backend) { text -> scope.launch { snackbar.showSnackbar(text) } }
                     },
@@ -204,6 +210,15 @@ fun DesktopApp(
             },
         )
     }
+
+    UpdateDialog(
+        state = updateState,
+        onUpdate = {
+            core.dismissUpdatePrompt()
+            core.installUpdate()
+        },
+        onLater = core::dismissUpdatePrompt,
+    )
 
     if (showLog) {
         LogDialog(

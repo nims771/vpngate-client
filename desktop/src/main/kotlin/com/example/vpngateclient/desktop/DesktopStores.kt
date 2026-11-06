@@ -7,12 +7,15 @@ import com.example.vpngateclient.vpn.Protocol
 import java.io.File
 import java.util.Properties
 
-/** Папка данных: %APPDATA%\VpnGateClient (или ~/.vpngateclient вне Windows). */
+/** Папка данных: %APPDATA%\ProXvpn (или ~/.proxvpn вне Windows). Старую папку VpnGateClient переносим. */
 object DesktopPaths {
     val appDir: File by lazy {
+        val win = System.getenv("APPDATA") != null
         val base = System.getenv("APPDATA")?.let { File(it) } ?: File(System.getProperty("user.home"))
-        val name = if (System.getenv("APPDATA") != null) "VpnGateClient" else ".vpngateclient"
-        File(base, name).apply { mkdirs() }
+        val dir = File(base, if (win) "ProXvpn" else ".proxvpn")
+        val old = File(base, if (win) "VpnGateClient" else ".vpngateclient")
+        if (!dir.exists() && old.isDirectory) runCatching { old.renameTo(dir) }
+        dir.apply { mkdirs() }
     }
 }
 
@@ -31,7 +34,7 @@ private class PropertiesFile(private val file: File) {
     fun putAll(values: Map<String, String>) {
         values.forEach { (k, v) -> props.setProperty(k, v) }
         val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.outputStream().use { props.store(it, "VPN Gate Client") }
+        tmp.outputStream().use { props.store(it, "ProXvpn") }
         if (!tmp.renameTo(file)) {
             file.delete()
             tmp.renameTo(file)
