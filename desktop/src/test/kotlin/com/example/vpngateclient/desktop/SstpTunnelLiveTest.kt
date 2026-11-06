@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
  */
 class SstpTunnelLiveTest {
     private fun trace(): String {
-        val c = URL("http://1.1.1.1/cdn-cgi/trace").openConnection() as HttpURLConnection
+        val c = URL("https://www.cloudflare.com/cdn-cgi/trace").openConnection() as HttpURLConnection
         c.connectTimeout = 10_000
         c.readTimeout = 10_000
         return c.inputStream.bufferedReader().readText().lines().firstOrNull { it.startsWith("ip=") }.orEmpty()
